@@ -5,39 +5,43 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IA Local - Projeto Neural</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Atualizando para versão 0.2.72 que corrige bugs de inicialização em ambientes restritos -->
+    
+    <!-- Usando a versão 0.2.60 que é muito estável para o Llama 3 -->
     <script type="module">
-        import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.72/+esm";
+        import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.60/+esm";
 
-        // Configuração BLINDADA
+        // CONFIGURAÇÃO BLINDADA DO MODELO
+        // Usaremos o Llama-3.2-1B (Mais leve e rápido)
+        const selectedModel = "Llama-3.2-1B-Instruct-q4f16_1-MLC";
+        
         const myAppConfig = {
             model_list: [
                 {
-                    "model_id": "Phi-3-mini-4k-instruct-q4f16_1-MLC",
-                    "model_lib_url": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/phi-3-mini-4k-instruct-q4f16_1-MLC/Phi-3-mini-4k-instruct-q4f16_1-MLC-webgpu.wasm",
-                    "model_url": "https://huggingface.co/mlc-ai/Phi-3-mini-4k-instruct-q4f16_1-MLC/resolve/main", // Sem barra no final
-                    "vram_required_MB": 3000,
+                    "model_id": "Llama-3.2-1B-Instruct-q4f16_1-MLC",
+                    // O campo model_lib é OBRIGATÓRIO em algumas versões para evitar erro de undefined
+                    "model_lib": "webllm-dyn-llama-3.2-1b-instruct-q4f16_1", 
+                    "model_lib_url": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/webllm-dyn/Llama-3.2-1B-Instruct-q4f16_1-MLC-webgpu.wasm",
+                    "model_url": "https://huggingface.co/mlc-ai/Llama-3.2-1B-Instruct-q4f16_1-MLC/resolve/main/",
+                    "vram_required_MB": 1500, // Requer muito menos memória
                     "low_resource_required": true,
                 }
             ],
             use_indexed_db_cache: true
-        }
+        };
 
-        const selectedModel = "Phi-3-mini-4k-instruct-q4f16_1-MLC"; 
-        
         let engine = null;
         let chatHistory = [];
 
         const $ = (id) => document.getElementById(id);
 
         async function initChat() {
-            $('status-text').innerText = "Verificando compatibilidade WebGPU...";
+            $('status-text').innerText = "Verificando WebGPU...";
             $('error-log').classList.add('hidden');
             $('loading-bar').style.width = "5%";
             
             const initProgressCallback = (report) => {
                 $('status-text').innerText = report.text;
-                // Lógica de barra de progresso mais detalhada
+                // Lógica de barra de progresso
                 if(report.text.includes("Fetching param cache")) {
                     const match = report.text.match(/(\d+)%/);
                     if (match) $('loading-bar').style.width = match[1] + "%";
@@ -50,12 +54,12 @@
 
             try {
                 if (!navigator.gpu) {
-                    throw new Error("Seu navegador não suporta WebGPU. Use Chrome (Desktop/Android) ou Edge atualizados.");
+                    throw new Error("Seu navegador não suporta WebGPU. Use Chrome/Edge no Desktop ou Android.");
                 }
 
-                console.log("Tentando carregar modelo com config:", myAppConfig);
+                console.log("Iniciando Llama-3.2-1B...");
 
-                // Criação do motor com tratamento de erro específico
+                // Criação do motor
                 engine = await webllm.CreateMLCEngine(
                     selectedModel,
                     { 
@@ -70,25 +74,26 @@
                 setTimeout(() => $('loading-container').style.display = 'none', 1000);
                 $('send-btn').disabled = false;
                 
+                // Prompt do Sistema (A "Alma" da IA)
                 const systemPrompt = `
-Você é uma IA assistente rodando localmente.
+Você é uma IA assistente inteligente rodando localmente.
 Responda sempre em Português do Brasil.
-Seja direta, técnica e prestativa.
+Seja concisa e útil.
 
-FERRAMENTAS DISPONÍVEIS:
-- Se precisar pesquisar algo na internet que você não sabe: Responda apenas com [BUSCAR: sua pesquisa aqui]
-- Se o usuário pedir para lembrar ou salvar algo: Responda apenas com [SALVAR: o dado aqui]
+COMANDOS ESPECIAIS:
+- Para pesquisar na internet: [BUSCAR: termo]
+- Para salvar memória: [SALVAR: dados]
 `;
                 chatHistory.push({ role: "system", content: systemPrompt });
 
             } catch (err) {
                 $('loading-container').style.display = 'flex';
-                $('status-text').innerText = "Falha crítica na inicialização.";
+                $('status-text').innerText = "Erro na inicialização.";
                 $('error-log').innerHTML = `
                     <strong>Erro:</strong> ${err.message}<br><br>
-                    <span class="text-yellow-300">DICA: Se o download falhou antes, o cache pode estar corrompido.</span><br>
-                    <button onclick="window.clearCache()" class="mt-2 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs uppercase font-bold tracking-wider">
-                        Limpar Cache e Reiniciar
+                    <span class="text-yellow-300">Tente limpar o cache se o erro persistir.</span><br>
+                    <button onclick="window.clearCache()" class="mt-2 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs uppercase font-bold">
+                        Forçar Limpeza de Cache
                     </button>
                 `;
                 $('error-log').classList.remove('hidden');
@@ -96,22 +101,21 @@ FERRAMENTAS DISPONÍVEIS:
             }
         }
 
-        // Função de emergência para limpar dados corrompidos
+        // Função de Limpeza de Emergência
         window.clearCache = async () => {
-             if(confirm("Isso apagará o modelo baixado (~2GB) e forçará um novo download. Continuar?")) {
+             if(confirm("Isso apagará o modelo e baixará novamente. Continuar?")) {
                 try {
-                    // Tenta apagar via WebLLM se possível, ou limpa IndexedDB manualmente
                     const databases = await window.indexedDB.databases();
                     for (const db of databases) {
-                        if (db.name.includes("webllm")) {
+                        if (db.name && db.name.includes("webllm")) {
                             window.indexedDB.deleteDatabase(db.name);
                         }
                     }
                     localStorage.clear();
-                    alert("Cache limpo. A página será recarregada.");
+                    alert("Cache limpo. Recarregando...");
                     window.location.reload();
                 } catch (e) {
-                    alert("Erro ao limpar cache: " + e.message);
+                    alert("Erro ao limpar: " + e.message);
                 }
              }
         }
@@ -147,7 +151,7 @@ FERRAMENTAS DISPONÍVEIS:
             const thinkingDiv = document.createElement('div');
             thinkingDiv.id = 'thinking';
             thinkingDiv.className = 'flex items-center gap-2 text-xs text-gray-400 italic ml-2 mb-2';
-            thinkingDiv.innerHTML = '<span class="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></span> Processando localmente...';
+            thinkingDiv.innerHTML = '<span class="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></span> Processando...';
             $('chat-box').appendChild(thinkingDiv);
 
             try {
@@ -160,6 +164,7 @@ FERRAMENTAS DISPONÍVEIS:
                 const aiResponse = reply.choices[0].message.content;
                 $('thinking').remove();
 
+                // Interceptação de Ferramentas
                 if (aiResponse.includes("[BUSCAR:")) {
                     handleSearchTool(aiResponse);
                 } else if (aiResponse.includes("[SALVAR:")) {
@@ -175,16 +180,22 @@ FERRAMENTAS DISPONÍVEIS:
             }
         };
 
+        // --- Ferramentas Simuladas (Por enquanto) ---
+
         async function handleSearchTool(command) {
             const query = command.match(/\[BUSCAR: (.*?)\]/)[1];
-            appendMessage('assistant', `🔎 <i>(Simulação) Pesquisando: "${query}"...</i>`);
+            appendMessage('assistant', `🔎 <i>Pesquisando (Simulação): "${query}"...</i>`);
             
-            const fakeResult = `Resultados simulados para "${query}": Esta é uma informação de teste.`;
-            chatHistory.push({ role: "system", content: `[SISTEMA]: Resultado da busca: "${fakeResult}". Responda ao usuário com base nisso.` });
-            
-            const followUp = await engine.chat.completions.create({ messages: chatHistory });
-            appendMessage('assistant', followUp.choices[0].message.content);
-            chatHistory.push({ role: "assistant", content: followUp.choices[0].message.content });
+            // Simulação de resposta da internet
+            setTimeout(async () => {
+                const fakeResult = `Resultado simulado para "${query}": Em breve conectaremos ao Google real.`;
+                chatHistory.push({ role: "system", content: `[SISTEMA]: Resultado da busca: "${fakeResult}".` });
+                
+                const followUp = await engine.chat.completions.create({ messages: chatHistory });
+                const finalText = followUp.choices[0].message.content;
+                appendMessage('assistant', finalText);
+                chatHistory.push({ role: "assistant", content: finalText });
+            }, 1000);
         }
 
         async function handleSaveTool(command) {
@@ -194,8 +205,8 @@ FERRAMENTAS DISPONÍVEIS:
             savedItems.push({ data: new Date().toISOString(), content: data });
             localStorage.setItem('ia_memoria', JSON.stringify(savedItems));
 
-            appendMessage('assistant', `💾 <i>Salvo na memória local: "${data}"</i>`);
-            chatHistory.push({ role: "assistant", content: `Confirmo que salvei: ${data}` });
+            appendMessage('assistant', `💾 <i>Salvo localmente: "${data}"</i>`);
+            chatHistory.push({ role: "assistant", content: `Salvei: ${data}` });
         }
 
         $('user-input').addEventListener('keypress', (e) => {
@@ -211,12 +222,12 @@ FERRAMENTAS DISPONÍVEIS:
     <header class="bg-gray-800 p-4 border-b border-gray-700 flex justify-between items-center shadow-lg z-10">
         <div class="flex items-center gap-3">
             <div class="relative">
-                <div class="w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
-                <div class="absolute inset-0 w-3 h-3 rounded-full bg-green-500 blur-sm animate-pulse"></div>
+                <div class="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></div>
+                <div class="absolute inset-0 w-3 h-3 rounded-full bg-blue-500 blur-sm animate-pulse"></div>
             </div>
             <div>
                 <h1 class="font-bold text-lg tracking-wide leading-none">Projeto Neural</h1>
-                <span class="text-[10px] text-gray-400 font-mono">MODELO: PHI-3 MINI 4K (Local)</span>
+                <span class="text-[10px] text-gray-400 font-mono">MODELO: LLAMA 3.2 1B (Leve)</span>
             </div>
         </div>
         
@@ -228,7 +239,7 @@ FERRAMENTAS DISPONÍVEIS:
     <!-- Overlay de Carregamento -->
     <div id="loading-container" class="absolute inset-0 bg-gray-900 z-50 flex flex-col items-center justify-center p-6 text-center">
         <div class="w-full max-w-md bg-gray-800 rounded-xl p-8 shadow-2xl border border-gray-700">
-            <h2 class="text-xl font-bold mb-4 text-white">Carregando Modelo Neural</h2>
+            <h2 class="text-xl font-bold mb-4 text-white">Carregando Cérebro Digital</h2>
             
             <div class="w-full bg-gray-900 h-4 rounded-full overflow-hidden mb-2 border border-gray-600">
                 <div id="loading-bar" class="h-full bg-blue-600 transition-all duration-300 relative" style="width: 0%">
@@ -236,12 +247,12 @@ FERRAMENTAS DISPONÍVEIS:
                 </div>
             </div>
             
-            <p id="status-text" class="text-blue-300 text-sm font-mono mt-2">Iniciando download...</p>
+            <p id="status-text" class="text-blue-300 text-sm font-mono mt-2">Inicializando...</p>
             
             <div id="error-log" class="hidden mt-4 p-3 bg-red-900/50 border border-red-500 rounded text-red-200 text-xs font-mono text-left overflow-auto max-h-48"></div>
 
             <p class="text-xs text-gray-500 mt-6 border-t border-gray-700 pt-4">
-                ⚠️ Este processo baixa ~2.3GB de dados. <br>
+                ⚠️ Baixando ~1.2GB (Llama 3.2 1B). <br>
                 Necessário apenas na primeira vez.
             </p>
         </div>
@@ -250,9 +261,9 @@ FERRAMENTAS DISPONÍVEIS:
     <!-- Área do Chat -->
     <main class="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth bg-gradient-to-b from-gray-900 to-gray-800" id="chat-box">
         <div class="p-4 rounded-xl bg-gray-800/80 backdrop-blur border border-gray-700 text-gray-200 self-start max-w-[85%] shadow-lg">
-            <p class="mb-2">⚡ <b>Sistema Iniciado.</b></p>
+            <p class="mb-2">⚡ <b>Sistema Pronto.</b></p>
             <p class="text-sm opacity-80">
-                Sou uma IA totalmente offline. Posso falar sobre qualquer coisa que esteja no meu treino base.
+                Sou uma IA offline baseada no Llama 3.2. Estou rodando direto no seu navegador.
             </p>
         </div>
     </main>
@@ -262,7 +273,7 @@ FERRAMENTAS DISPONÍVEIS:
         <div class="max-w-4xl mx-auto flex gap-3 relative">
             <input type="text" id="user-input" 
                 class="w-full bg-gray-900 border border-gray-600 rounded-xl px-5 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all shadow-inner"
-                placeholder="Converse com a IA..." autocomplete="off">
+                placeholder="Digite sua mensagem..." autocomplete="off">
                 
             <button onclick="window.sendMessage()" id="send-btn" disabled
                 class="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white px-6 rounded-xl font-bold transition-all shadow-lg hover:shadow-blue-500/20 active:scale-95 flex items-center justify-center min-w-[60px]">
