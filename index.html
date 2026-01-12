@@ -5,23 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IA Local - Projeto Neural</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Atualizando para versão 0.2.60 que é mais robusta com URLs explícitas -->
+    <!-- Atualizando para versão 0.2.72 que corrige bugs de inicialização em ambientes restritos -->
     <script type="module">
-        import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.60/+esm";
+        import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.72/+esm";
 
-        // Configuração COMPLETA para evitar ambiguidades e erros de undefined
+        // Configuração BLINDADA
         const myAppConfig = {
             model_list: [
                 {
                     "model_id": "Phi-3-mini-4k-instruct-q4f16_1-MLC",
-                    // Link para o arquivo WASM (o motor compilado)
                     "model_lib_url": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/phi-3-mini-4k-instruct-q4f16_1-MLC/Phi-3-mini-4k-instruct-q4f16_1-MLC-webgpu.wasm",
-                    // Link para os pesos do modelo (O Cérebro) - Faltava isso, causando o erro 'endsWith'
-                    "model_url": "https://huggingface.co/mlc-ai/Phi-3-mini-4k-instruct-q4f16_1-MLC/resolve/main/",
+                    "model_url": "https://huggingface.co/mlc-ai/Phi-3-mini-4k-instruct-q4f16_1-MLC/resolve/main", // Sem barra no final
                     "vram_required_MB": 3000,
                     "low_resource_required": true,
                 }
-            ]
+            ],
+            use_indexed_db_cache: true
         }
 
         const selectedModel = "Phi-3-mini-4k-instruct-q4f16_1-MLC"; 
@@ -32,12 +31,13 @@
         const $ = (id) => document.getElementById(id);
 
         async function initChat() {
-            $('status-text').innerText = "Inicializando motor gráfico (WebGPU)...";
+            $('status-text').innerText = "Verificando compatibilidade WebGPU...";
             $('error-log').classList.add('hidden');
+            $('loading-bar').style.width = "5%";
             
             const initProgressCallback = (report) => {
                 $('status-text').innerText = report.text;
-                // Lógica de barra de progresso
+                // Lógica de barra de progresso mais detalhada
                 if(report.text.includes("Fetching param cache")) {
                     const match = report.text.match(/(\d+)%/);
                     if (match) $('loading-bar').style.width = match[1] + "%";
@@ -53,14 +53,15 @@
                     throw new Error("Seu navegador não suporta WebGPU. Use Chrome (Desktop/Android) ou Edge atualizados.");
                 }
 
-                console.log("Iniciando carregamento do modelo com config:", myAppConfig);
+                console.log("Tentando carregar modelo com config:", myAppConfig);
 
+                // Criação do motor com tratamento de erro específico
                 engine = await webllm.CreateMLCEngine(
                     selectedModel,
                     { 
                         appConfig: myAppConfig,
                         initProgressCallback: initProgressCallback,
-                        logLevel: "INFO" // Ajuda a ver o que está acontecendo no console
+                        logLevel: "INFO"
                     }
                 );
                 
@@ -83,10 +84,36 @@ FERRAMENTAS DISPONÍVEIS:
             } catch (err) {
                 $('loading-container').style.display = 'flex';
                 $('status-text').innerText = "Falha crítica na inicialização.";
-                $('error-log').innerText = `${err.message}\n\nVerifique o console (F12) para detalhes.`;
+                $('error-log').innerHTML = `
+                    <strong>Erro:</strong> ${err.message}<br><br>
+                    <span class="text-yellow-300">DICA: Se o download falhou antes, o cache pode estar corrompido.</span><br>
+                    <button onclick="window.clearCache()" class="mt-2 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs uppercase font-bold tracking-wider">
+                        Limpar Cache e Reiniciar
+                    </button>
+                `;
                 $('error-log').classList.remove('hidden');
                 console.error("Erro detalhado:", err);
             }
+        }
+
+        // Função de emergência para limpar dados corrompidos
+        window.clearCache = async () => {
+             if(confirm("Isso apagará o modelo baixado (~2GB) e forçará um novo download. Continuar?")) {
+                try {
+                    // Tenta apagar via WebLLM se possível, ou limpa IndexedDB manualmente
+                    const databases = await window.indexedDB.databases();
+                    for (const db of databases) {
+                        if (db.name.includes("webllm")) {
+                            window.indexedDB.deleteDatabase(db.name);
+                        }
+                    }
+                    localStorage.clear();
+                    alert("Cache limpo. A página será recarregada.");
+                    window.location.reload();
+                } catch (e) {
+                    alert("Erro ao limpar cache: " + e.message);
+                }
+             }
         }
 
         function appendMessage(role, text) {
@@ -152,9 +179,7 @@ FERRAMENTAS DISPONÍVEIS:
             const query = command.match(/\[BUSCAR: (.*?)\]/)[1];
             appendMessage('assistant', `🔎 <i>(Simulação) Pesquisando: "${query}"...</i>`);
             
-            // Aqui fingimos que o Google respondeu para a IA continuar
-            const fakeResult = `Resultados simulados para "${query}": Esta é uma informação de teste, pois o módulo de internet real ainda será conectado.`;
-            
+            const fakeResult = `Resultados simulados para "${query}": Esta é uma informação de teste.`;
             chatHistory.push({ role: "system", content: `[SISTEMA]: Resultado da busca: "${fakeResult}". Responda ao usuário com base nisso.` });
             
             const followUp = await engine.chat.completions.create({ messages: chatHistory });
@@ -213,7 +238,7 @@ FERRAMENTAS DISPONÍVEIS:
             
             <p id="status-text" class="text-blue-300 text-sm font-mono mt-2">Iniciando download...</p>
             
-            <div id="error-log" class="hidden mt-4 p-3 bg-red-900/50 border border-red-500 rounded text-red-200 text-xs font-mono text-left overflow-auto max-h-32"></div>
+            <div id="error-log" class="hidden mt-4 p-3 bg-red-900/50 border border-red-500 rounded text-red-200 text-xs font-mono text-left overflow-auto max-h-48"></div>
 
             <p class="text-xs text-gray-500 mt-6 border-t border-gray-700 pt-4">
                 ⚠️ Este processo baixa ~2.3GB de dados. <br>
