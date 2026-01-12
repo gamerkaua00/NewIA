@@ -171,14 +171,11 @@
             try {
                 if (!navigator.gpu) throw new Error("GPU WebGPU não detectada.");
 
-                // CRIAÇÃO DO MOTOR - SEM CONFIG MANUAL para evitar erros
-                // Usamos os defaults da biblioteca que são mais seguros
                 engine = await webllm.CreateMLCEngine(
                     MODEL_ID,
                     { 
                         initProgressCallback: initProgressCallback,
                         logLevel: "WARN",
-                        // appConfig removido para usar o padrão da biblioteca
                     }
                 );
 
@@ -243,15 +240,21 @@ REGRAS:
             let context = "";
             if (memories.length > 0) context = `CONTEXTO DA MEMÓRIA: ${memories.join(' | ')}.`;
 
+            // CORREÇÃO: Em vez de adicionar uma mensagem {role: system}, injetamos o contexto no texto do usuário.
+            // Isso evita o erro "system prompt should always be the first message".
+            const userMessageWithContext = context 
+                ? `Contexto recuperado do banco de dados: ${context}\n\nUsuário diz: ${text}` 
+                : text;
+
             const tempHistory = [
                 ...chatHistory, 
-                { role: "system", content: context || "Sem memórias sobre isso." },
-                { role: "user", content: text }
+                { role: "user", content: userMessageWithContext }
             ];
 
             const loadingId = showLoadingIndicator();
 
             try {
+                // 1. Decisão
                 const reply = await engine.chat.completions.create({
                     messages: tempHistory,
                     temperature: 0.1,
@@ -289,8 +292,10 @@ REGRAS:
 
                 if (externalData) {
                     updateLoadingText(loadingId, "Formulando resposta...");
+                    // Adiciona o pensamento da IA
                     tempHistory.push({ role: "assistant", content: responseText });
-                    tempHistory.push({ role: "system", content: `DADO OBTIDO: ${externalData}. Responda ao usuário.` });
+                    // Adiciona o resultado da ferramenta como USER (para não quebrar a ordem)
+                    tempHistory.push({ role: "user", content: `Resultado da ferramenta: ${externalData}. Agora responda ao usuário.` });
                     
                     const finalReply = await engine.chat.completions.create({
                         messages: tempHistory,
