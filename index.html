@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <title>NeuralOS v7.1 - Developer</title>
+    <title>NeuralOS v7.2 - Stable</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
@@ -26,7 +26,7 @@
         let isOfflineMode = false;
         let recognition = null;
         let availableVoices = [];
-        let currentCanvasCode = ""; // Guarda o código atual para correções
+        let currentCanvasCode = ""; 
         
         let userConfig = {
             name: localStorage.getItem('neural_user_name') || 'Admin',
@@ -46,15 +46,15 @@
             const inputWrapper = $('input-wrapper');
             const headers = document.querySelectorAll('header');
             const modals = document.querySelectorAll('.modal-bg');
+            const canvasModal = $('canvas-modal-header');
             
             if (userConfig.amoled) {
-                // Modo Escuro Real
+                // Modo Escuro Real (Preto Absoluto)
                 body.className = "font-sans antialiased bg-black text-gray-200 h-full w-full overflow-hidden flex flex-col";
                 appContainer.className = appContainer.className.replace('bg-white', 'bg-black').replace('border-gray-100', 'border-gray-800');
                 
-                // Input Bar (Correção Crítica)
-                inputContainer.classList.replace('bg-white', 'bg-black');
-                inputContainer.classList.replace('border-gray-100', 'border-gray-800');
+                // Input Bar 
+                inputContainer.className = "w-full p-4 bg-black z-10 transition-colors shrink-0 border-t border-gray-800";
                 inputWrapper.className = "flex items-center gap-2 border p-1.5 pl-2 rounded-full shadow-sm bg-gray-900 border-gray-700";
                 
                 // Headers
@@ -62,24 +62,26 @@
                 
                 // Modals
                 modals.forEach(m => m.classList.replace('bg-white', 'bg-gray-900'));
+                if(canvasModal) canvasModal.classList.replace('bg-gray-900', 'bg-black');
                 
-                $('input-box').classList.replace('text-gray-800', 'text-white');
-                $('input-box').classList.replace('placeholder-gray-400', 'placeholder-gray-600');
+                const inputBox = $('input-box');
+                inputBox.classList.replace('text-gray-800', 'text-white');
+                inputBox.classList.replace('placeholder-gray-400', 'placeholder-gray-600');
             } else {
                 // Modo Claro
                 body.className = "font-sans antialiased bg-slate-50 text-slate-800 h-full w-full overflow-hidden flex flex-col";
                 appContainer.className = appContainer.className.replace('bg-black', 'bg-white').replace('border-gray-800', 'border-gray-100');
                 
-                inputContainer.classList.replace('bg-black', 'bg-white');
-                inputContainer.classList.replace('border-gray-800', 'border-gray-100');
+                inputContainer.className = "w-full p-4 bg-white z-10 transition-colors shrink-0 border-t border-gray-100";
                 inputWrapper.className = "flex items-center gap-2 border p-1.5 pl-2 rounded-full shadow-sm bg-white border-gray-200";
                 
                 headers.forEach(h => h.className = h.className.replace('bg-black/90', 'bg-white/90').replace('border-gray-800', 'border-gray-100'));
                 
                 modals.forEach(m => m.classList.replace('bg-gray-900', 'bg-white'));
                 
-                $('input-box').classList.replace('text-white', 'text-gray-800');
-                $('input-box').classList.replace('placeholder-gray-600', 'placeholder-gray-400');
+                const inputBox = $('input-box');
+                inputBox.classList.replace('text-white', 'text-gray-800');
+                inputBox.classList.replace('placeholder-gray-600', 'placeholder-gray-400');
             }
         }
 
@@ -114,16 +116,16 @@
             window.speechSynthesis.speak(utterance);
         }
 
-        // --- SISTEMA CANVAS PRO (Com Logs) ---
+        // --- SISTEMA CANVAS PRO ---
         window.openCanvas = (code, type) => {
-            currentCanvasCode = code; // Salva para correções
+            currentCanvasCode = code; 
             const modal = $('canvas-modal');
             const container = $('canvas-container');
             const consoleDiv = $('canvas-console');
             const title = $('canvas-title');
             
             container.innerHTML = ''; 
-            consoleDiv.innerHTML = '<div class="text-gray-500 italic">Console pronto...</div>'; // Reset logs
+            consoleDiv.innerHTML = '<div class="text-gray-500 italic">Console pronto...</div>';
             title.innerText = type === 'html' ? 'App Preview' : 'Código';
             
             if (type === 'html') {
@@ -131,7 +133,6 @@
                 iframe.className = "w-full h-full bg-white rounded-lg border-0";
                 container.appendChild(iframe);
                 
-                // Injeta script de captura de erro
                 const errorCaptureScript = `
                     <script>
                         window.onerror = function(message, source, lineno, colno, error) {
@@ -157,12 +158,11 @@
             modal.classList.remove('hidden');
         };
 
-        // Listener de mensagens do Iframe (Logs)
         window.addEventListener('message', (event) => {
             const consoleDiv = $('canvas-console');
             if (event.data.type === 'error') {
                 consoleDiv.innerHTML += `<div class="text-red-400 mt-1">❌ Erro (L${event.data.line}): ${event.data.message}</div>`;
-                $('fix-code-btn').classList.remove('hidden'); // Mostra botão de corrigir
+                $('fix-code-btn').classList.remove('hidden'); 
                 $('fix-code-btn').dataset.error = event.data.message;
             } else if (event.data.type === 'log') {
                 consoleDiv.innerHTML += `<div class="text-blue-300 mt-1">ℹ️ ${event.data.message}</div>`;
@@ -172,7 +172,6 @@
         window.fixCanvasCode = () => {
             const errorMsg = $('fix-code-btn').dataset.error;
             closeCanvas();
-            // Manda para o chat como se fosse o usuário pedindo
             const prompt = `O código gerado deu este erro: "${errorMsg}". Por favor, corrija o código abaixo e execute novamente:\n\n${currentCanvasCode}`;
             $('input-box').value = prompt;
             window.sendMessage();
@@ -184,44 +183,61 @@
             $('fix-code-btn').classList.add('hidden');
         };
 
-        // --- SISTEMA DE PDF OTIMIZADO (Sem Travamento) ---
+        // --- SISTEMA DE PDF OTIMIZADO (V2) ---
         const Tools = {
             generatePDF: async (title, content) => {
+                showToast("Gerando PDF..."); 
+                
+                // Pequeno delay para a UI atualizar antes do processamento pesado
+                await new Promise(r => setTimeout(r, 100));
+
                 try {
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF();
                     
                     const pageWidth = doc.internal.pageSize.getWidth();
                     const pageHeight = doc.internal.pageSize.getHeight();
-                    const margin = 10;
+                    const margin = 15;
                     const maxTextWidth = pageWidth - (margin * 2);
                     
+                    // Limpeza de Markdown básico para o PDF ficar limpo
+                    const cleanContent = content
+                        .replace(/\*\*(.*?)\*\*/g, '$1') // Negrito
+                        .replace(/\*(.*?)\*/g, '$1') // Itálico
+                        .replace(/`/g, '') // Código inline
+                        .replace(/#+\s/g, ''); // Headers
+
                     // Título
+                    doc.setFont("helvetica", "bold");
                     doc.setFontSize(18);
-                    doc.text(title || "Documento NeuralOS", margin, 20);
+                    doc.text(title || "Relatório NeuralOS", margin, 20);
                     
-                    // Conteúdo com Paginação Automática
-                    doc.setFontSize(12);
-                    const lines = doc.splitTextToSize(content, maxTextWidth);
+                    // Conteúdo
+                    doc.setFont("helvetica", "normal");
+                    doc.setFontSize(11);
                     
-                    let cursorY = 30; // Posição inicial Y
-                    const lineHeight = 7;
+                    // Quebra o texto em linhas que cabem na página
+                    const lines = doc.splitTextToSize(cleanContent, maxTextWidth);
                     
-                    lines.forEach(line => {
-                        // Se a linha passar do final da página, cria nova página
+                    let cursorY = 35; 
+                    const lineHeight = 6;
+                    
+                    // Loop de renderização seguro
+                    for (let i = 0; i < lines.length; i++) {
                         if (cursorY + lineHeight > pageHeight - margin) {
                             doc.addPage();
-                            cursorY = 20; // Reseta Y no topo da nova página
+                            cursorY = 20; 
                         }
-                        doc.text(line, margin, cursorY);
+                        doc.text(lines[i], margin, cursorY);
                         cursorY += lineHeight;
-                    });
+                    }
                     
-                    doc.save(`${(title || 'doc').replace(/\s+/g, '_')}.pdf`);
-                    return "PDF gerado com sucesso (Paginação automática).";
+                    const fileName = `${(title || 'documento').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`;
+                    doc.save(fileName);
+                    return `PDF "${fileName}" gerado e baixado.`;
                 } catch (e) {
                     console.error(e);
-                    return "Erro crítico ao gerar PDF. Tente um texto menor.";
+                    return "Erro interno na geração do PDF. Tente um texto menor.";
                 }
             },
             weather: async (city) => {
@@ -246,27 +262,25 @@
 
         // --- CORE ---
         function updateSystemPrompt() {
-            let persona = "Seja um desenvolvedor experiente e útil.";
+            let persona = "Seja um assistente inteligente.";
             if (userConfig.vibe === 'Jarvis') persona = "Aja como JARVIS. Técnico, preciso.";
             if (userConfig.vibe === 'Amigo') persona = "Seja casual, brother.";
             
             chatHistory[0] = { 
                 role: "system", 
                 content: `
-Você é o NeuralOS v7.1. USUÁRIO: ${userConfig.name}. PERSONALIDADE: ${persona}.
-DIRETRIZES:
-1. Use tags <pensamento> para planejar.
-2. Se o usuário pedir código HTML/JS, use blocos \`\`\`html ou \`\`\`javascript para ativar o Canvas.
-3. Se pedir PDF, use a ferramenta [PDF: titulo | conteudo].
-4. Se pedir para testar/executar código, gere o código novamente dentro de um bloco de código.
-5. Ferramentas: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOOGLE: termo], [PDF: titulo | conteudo].
+Você é o NeuralOS v7.2. USUÁRIO: ${userConfig.name}. PERSONALIDADE: ${persona}.
+AUTO-LEARNING ATIVO:
+1. Se não souber algo, use [WIKI: termo] para aprender e depois [MEM: resumo] para salvar no banco.
+2. Ao receber [WIKI] ou [CLIMA], combine a informação na resposta final.
+3. Se o usuário pedir um PDF, crie o conteúdo e use [PDF: titulo | conteudo].
+4. Para código, use \`\`\`html ou \`\`\`javascript.
 ` 
             };
         }
 
         async function initSystem() {
-            applyTheme(); // Aplica tema na largada
-            
+            applyTheme();
             const wakeUpPromise = DB.wakeUp();
             updateSystemPrompt(); 
 
@@ -346,13 +360,13 @@ DIRETRIZES:
 
                 // Parser de Ferramentas
                 if (final.includes("[PDF:")) {
-                    updateLoading(loadingId, "Gerando PDF (Paginado)...");
+                    updateLoading(loadingId, "Gerando PDF...");
                     const match = final.match(/\[PDF: (.*?)\s*\|\s*([\s\S]*?)\]/);
                     if (match) {
                         const title = match[1];
                         const content = match[2];
                         toolResult = await Tools.generatePDF(title, content);
-                        final = final.replace(/\[PDF:.*?\]/s, `📄 PDF "<b>${title}</b>" gerado com sucesso.`);
+                        final = final.replace(/\[PDF:.*?\]/s, `📄 ${toolResult}`);
                     } else {
                         toolResult = "Erro formato PDF. Use [PDF: Titulo | Conteudo].";
                     }
@@ -374,7 +388,7 @@ DIRETRIZES:
                 else if (final.includes("[MEM:")) {
                     const c = final.match(/\[MEM: (.*?)\]/)[1];
                     await DB.add(c);
-                    toolResult = "Memória salva com sucesso.";
+                    toolResult = "Info salva no banco de dados.";
                 }
                 else if (final.includes("[YOUTUBE:")) {
                     const t = final.match(/\[YOUTUBE: (.*?)\]/)[1];
@@ -389,7 +403,7 @@ DIRETRIZES:
 
                 if (toolResult) {
                     tempHistory.push({ role: "assistant", content: raw });
-                    tempHistory.push({ role: "user", content: `Resultado Sistema: ${toolResult}. Continue.` });
+                    tempHistory.push({ role: "user", content: `Resultado Sistema: ${toolResult}. Continue respondendo.` });
                     const step2 = await engine.chat.completions.create({ messages: tempHistory });
                     final = step2.choices[0].message.content.replace(/<pensamento>.*?<\/pensamento>/s, "").trim();
                 }
@@ -444,8 +458,8 @@ DIRETRIZES:
                 local.unshift({ ...entry, id: Date.now() });
                 localStorage.setItem('neural_local_db', JSON.stringify(local));
                 // Feedback visual mais claro
-                const localMsg = isOnlineDB ? "Salvo na Nuvem (+Backup Local)" : "Salvo Localmente (Sem Conexão)";
-                showToast(`💾 ${localMsg}`);
+                const localMsg = isOnlineDB ? "Nuvem + Local" : "Local (Offline)";
+                showToast(`💾 Salvo: ${localMsg}`);
                 DB.refreshList();
             },
             search: async (term) => {
@@ -536,11 +550,17 @@ DIRETRIZES:
         }
         function updateLoading(id, txt) { const el = document.getElementById(id+'-txt'); if(el) el.innerText = txt; }
         function removeLoading(id) { const el = document.getElementById(id); if(el) el.remove(); }
-        function showToast(msg) { /* Placeholder toast */ }
+        function showToast(msg) { 
+            const t = document.createElement('div');
+            t.className = "fixed top-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50 animate-fade-in";
+            t.innerText = msg;
+            document.body.appendChild(t);
+            setTimeout(() => t.remove(), 2000);
+        }
 
         // UTILS
         window.toggleSettings = () => { $('settings-modal').classList.toggle('hidden'); loadVoices(); };
-        window.saveSettings = () => { /* Logica de save igual anterior */ 
+        window.saveSettings = () => { 
             userConfig.name = $('input-name').value;
             userConfig.vibe = $('select-vibe').value;
             userConfig.ttsEnabled = $('check-tts').checked;
@@ -578,7 +598,7 @@ DIRETRIZES:
 
     <!-- CANVAS MODAL (Com Logs) -->
     <div id="canvas-modal" class="hidden fixed inset-0 z-50 bg-black flex flex-col animate-fade-in">
-        <div class="h-12 bg-gray-900 flex items-center justify-between px-4 border-b border-gray-800 shrink-0">
+        <div id="canvas-modal-header" class="h-12 bg-gray-900 flex items-center justify-between px-4 border-b border-gray-800 shrink-0">
             <h3 id="canvas-title" class="text-white text-sm font-bold flex items-center gap-2">
                 <i data-lucide="layout" class="w-4 h-4 text-green-400"></i> Canvas Pro
             </h3>
@@ -625,7 +645,7 @@ DIRETRIZES:
         <div class="w-20 h-20 mb-6 rounded-3xl bg-indigo-600 flex items-center justify-center shadow-xl animate-bounce">
             <i data-lucide="cpu" class="text-white w-10 h-10"></i>
         </div>
-        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v7.1</span></h2>
+        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v7.2</span></h2>
         <p id="status-text" class="text-gray-400 text-xs font-mono mb-8">Iniciando...</p>
         <div class="w-48 h-1.5 bg-gray-100 rounded-full overflow-hidden">
             <div id="loading-bar" class="h-full bg-indigo-600 transition-all duration-300 w-0"></div>
