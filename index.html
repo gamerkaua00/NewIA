@@ -10,7 +10,8 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     
     <script type="module">
-        import * as webllm from "https://esm.run/@mlc-ai/web-llm";
+        // Importando versão ESTÁVEL 0.2.72 para evitar erros de compatibilidade
+        import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.72/+esm";
 
         // ======================================================
         // ⚙️ CONFIGURAÇÃO DO SEU SERVIDOR (RENDER)
@@ -18,24 +19,9 @@
         const RENDER_API_URL = "https://neural-api-3vra.onrender.com"; 
         // ======================================================
 
-        // Identificador do modelo
+        // Modelo nativo da versão 0.2.72 (Não requer config manual)
         const MODEL_ID = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
         const MAX_HISTORY = 10;
-
-        // --- CORREÇÃO DO ERRO 'FIND' ---
-        // Definimos manualmente onde estão os arquivos para a biblioteca não se perder
-        const myAppConfig = {
-            model_list: [
-                {
-                    "model_id": MODEL_ID,
-                    "model_lib_url": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/webllm-dyn/Llama-3.2-3B-Instruct-q4f16_1-MLC-webgpu.wasm",
-                    "model_url": "https://huggingface.co/mlc-ai/Llama-3.2-3B-Instruct-q4f16_1-MLC/resolve/main/",
-                    "vram_required_MB": 3000,
-                    "low_resource_required": false,
-                }
-            ],
-            use_indexed_db_cache: true
-        };
 
         let engine = null;
         let chatHistory = [];
@@ -51,7 +37,6 @@
                     $('status-text').innerText = "Acordando servidor no Render...";
                     $('status-text').className = "text-yellow-400 text-xs font-mono mb-6 mt-2 animate-pulse";
                     
-                    // O Render demora até 60s para acordar do plano free
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 60000);
                     
@@ -81,7 +66,6 @@
                         DB.refreshList();
                     } catch(e) { showToast("Erro ao salvar na nuvem"); }
                 } else {
-                    // Fallback Local
                     const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
                     local.unshift({ id: Date.now(), content: text, date: new Date().toISOString() });
                     localStorage.setItem('neural_local_db', JSON.stringify(local));
@@ -145,7 +129,6 @@
             }
         };
 
-        // Helpers globais
         window.delLocal = (id) => {
             let local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
             local = local.filter(m => m.id !== id);
@@ -153,7 +136,6 @@
             DB.refreshList();
         }
 
-        // --- SISTEMA WEB (APIs Gratuitas) ---
         const WebAgent = {
             searchWiki: async (q) => {
                 try {
@@ -167,7 +149,6 @@
 
         // --- INICIALIZAÇÃO ---
         async function initSystem() {
-            // 1. Tenta acordar o servidor enquanto baixa a IA
             const wakeUpPromise = DB.wakeUp();
 
             $('status-text').innerText = "Carregando Cérebro...";
@@ -190,28 +171,26 @@
             try {
                 if (!navigator.gpu) throw new Error("GPU WebGPU não detectada.");
 
-                // 2. Carrega IA com CONFIGURAÇÃO EXPLÍCITA
+                // CRIAÇÃO DO MOTOR - SEM CONFIG MANUAL para evitar erros
+                // Usamos os defaults da biblioteca que são mais seguros
                 engine = await webllm.CreateMLCEngine(
                     MODEL_ID,
                     { 
-                        appConfig: myAppConfig, // <--- AQUI ESTÁ A CORREÇÃO
                         initProgressCallback: initProgressCallback,
-                        logLevel: "WARN"
+                        logLevel: "WARN",
+                        // appConfig removido para usar o padrão da biblioteca
                     }
                 );
 
                 await engine.chat.completions.create({ messages: [{ role: "user", content: "hi" }], max_tokens: 1 });
                 
-                // Aguarda o servidor acordar (ou timeout)
                 await wakeUpPromise;
                 DB.refreshList();
 
-                // UI Ready
                 $('loading-screen').classList.add('opacity-0', 'pointer-events-none');
                 setTimeout(() => $('loading-screen').style.display = 'none', 500);
                 lucide.createIcons();
 
-                // Prompt
                 chatHistory = [{ 
                     role: "system", 
                     content: `
@@ -231,15 +210,21 @@ REGRAS:
                 $('status-text').innerText = "Erro: " + err.message;
                 $('status-text').className = "text-red-500 text-xs font-bold";
                 
-                // Botão de limpar cache em caso de erro persistente
                 const btn = document.createElement("button");
                 btn.className = "mt-4 bg-red-600 text-white px-4 py-2 rounded text-xs";
                 btn.innerText = "Limpar Cache e Reiniciar";
                 btn.onclick = async () => {
                     if(confirm("Isso apagará o modelo baixado e baixará novamente. Continuar?")) {
-                        const dbs = await window.indexedDB.databases();
-                        dbs.forEach(db => window.indexedDB.deleteDatabase(db.name));
-                        window.location.reload();
+                        try {
+                            const dbs = await window.indexedDB.databases();
+                            for(let db of dbs) {
+                                window.indexedDB.deleteDatabase(db.name);
+                            }
+                            localStorage.clear();
+                            window.location.reload();
+                        } catch(e) {
+                            alert("Erro ao limpar. Tente limpar dados do site nas configurações do navegador.");
+                        }
                     }
                 };
                 $('loading-screen').appendChild(btn);
@@ -254,7 +239,6 @@ REGRAS:
             appendBubble('user', text);
             input.value = '';
 
-            // RAG (Busca Memória)
             const memories = await DB.search(text);
             let context = "";
             if (memories.length > 0) context = `CONTEXTO DA MEMÓRIA: ${memories.join(' | ')}.`;
@@ -268,7 +252,6 @@ REGRAS:
             const loadingId = showLoadingIndicator();
 
             try {
-                // 1. Decisão
                 const reply = await engine.chat.completions.create({
                     messages: tempHistory,
                     temperature: 0.1,
@@ -278,7 +261,6 @@ REGRAS:
                 let responseText = reply.choices[0].message.content;
                 let externalData = null;
 
-                // 2. Ferramentas
                 if (responseText.includes("[WIKI:")) {
                     updateLoadingText(loadingId, "Lendo Wikipedia...");
                     const term = responseText.match(/\[WIKI: (.*?)\]/)[1];
@@ -305,7 +287,6 @@ REGRAS:
                     responseText = `🌐 Pesquisando no Google: **${term}**`;
                 }
 
-                // 3. Resposta Final
                 if (externalData) {
                     updateLoadingText(loadingId, "Formulando resposta...");
                     tempHistory.push({ role: "assistant", content: responseText });
@@ -331,7 +312,6 @@ REGRAS:
             }
         };
 
-        // UI Utils
         function appendBubble(role, text) {
             const box = $('chat-content');
             const div = document.createElement('div');
