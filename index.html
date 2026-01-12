@@ -3,387 +3,350 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <title>NeuralOS Modular</title>
+    <title>NeuralOS - Sistema Unificado</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
-    <!-- 
-        NOTA PARA O DESENVOLVEDOR (VOCÊ):
-        Este código foi estruturado em MÓDULOS.
-        Para levar ao GitHub, você pode separar as classes abaixo em arquivos:
-        - MemorySystem -> memory.js
-        - NetworkAgent -> network.js
-        - NeuralCore   -> core.js
-        - UIController -> ui.js
-    -->
-
     <script type="module">
-        import * as webllm from "https://esm.run/@mlc-ai/web-llm";
+        // Importando versão específica para estabilidade
+        import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.72/+esm";
 
-        // ==========================================
-        // MÓDULO 1: SISTEMA DE MEMÓRIA (Excel.js)
-        // ==========================================
-        class MemorySystem {
-            constructor() {
-                this.db = [];
-                this.load();
-            }
-
-            load() {
-                const saved = localStorage.getItem('neural_db_v2');
-                this.db = saved ? JSON.parse(saved) : [];
-            }
-
-            save() {
-                localStorage.setItem('neural_db_v2', JSON.stringify(this.db));
-                window.ui.renderTable(); // Atualiza UI sempre que salvar
-            }
-
-            add(content, category = "Geral") {
-                const id = Date.now();
-                const date = new Date().toLocaleDateString('pt-BR');
-                this.db.unshift({ id, date, category, content });
-                this.save();
-                return id;
-            }
-
-            delete(id) {
-                this.db = this.db.filter(item => item.id !== id);
-                this.save();
-            }
-
-            edit(id, field, newValue) {
-                const row = this.db.find(item => item.id === id);
-                if (row) {
-                    row[field] = newValue;
-                    this.save();
+        // --- CONFIGURAÇÃO BLINDADA (Corrige o erro 'find') ---
+        // Definimos explicitamente onde estão os arquivos para a biblioteca não se perder.
+        const modelConfig = {
+            model_list: [
+                {
+                    "model_id": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+                    "model_lib_url": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/webllm-dyn/Llama-3.2-3B-Instruct-q4f16_1-MLC-webgpu.wasm",
+                    "model_url": "https://huggingface.co/mlc-ai/Llama-3.2-3B-Instruct-q4f16_1-MLC/resolve/main/",
+                    "vram_required_MB": 2800,
+                    "low_resource_required": false,
                 }
-            }
+            ],
+            use_indexed_db_cache: true
+        };
+        
+        const MODEL_ID = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
+        const MAX_HISTORY = 10;
 
-            search(query) {
-                if (!query) return this.db.slice(0, 5);
-                const term = query.toLowerCase();
-                return this.db.filter(row => 
-                    row.content.toLowerCase().includes(term) || 
-                    row.category.toLowerCase().includes(term)
-                ).slice(0, 5);
-            }
-        }
+        // Variáveis Globais (Sistema Unificado)
+        let engine = null;
+        let chatHistory = [];
+        let memoryDB = [];
+        
+        // Helper
+        const $ = (id) => document.getElementById(id);
 
-        // ==========================================
-        // MÓDULO 2: AGENTE DE INTERNET (Network.js)
-        // ==========================================
-        class NetworkAgent {
-            execute(command) {
-                // YOUTUBE
-                if (command.includes("[YOUTUBE:")) {
-                    const term = command.match(/\[YOUTUBE: (.*?)\]/)[1];
-                    this.openUrl(`https://www.youtube.com/results?search_query=${encodeURIComponent(term)}`);
-                    return { type: 'video', text: `Abrindo YouTube para: ${term}`, icon: 'play-circle' };
+        // --- SISTEMA DE INICIALIZAÇÃO ---
+        async function initSystem() {
+            // 1. Carregar Memória
+            loadMemoryDB();
+            renderDatabaseTable();
+
+            $('status-text').innerText = "Verificando arquivos do modelo...";
+            $('loading-bar').style.width = "10%";
+
+            const initProgressCallback = (report) => {
+                const text = report.text;
+                // Lógica de feedback visual
+                if(text.includes("Fetching")) {
+                    const match = text.match(/(\d+)%/);
+                    const pct = match ? match[1] : "0";
+                    $('status-text').innerText = `Baixando Módulos (${pct}%)...`;
+                    $('loading-bar').style.width = pct + "%";
+                } else if (text.includes("Loading")) {
+                     $('status-text').innerText = "Carregando na RAM...";
+                     $('loading-bar').style.width = "90%";
+                } else if (text.includes("Finish")) {
+                     $('loading-bar').style.width = "100%";
                 }
-                
-                // GOOGLE
-                if (command.includes("[GOOGLE:")) {
-                    const term = command.match(/\[GOOGLE: (.*?)\]/)[1];
-                    this.openUrl(`https://www.google.com/search?q=${encodeURIComponent(term)}`);
-                    return { type: 'search', text: `Pesquisando: ${term}`, icon: 'search' };
-                }
+            };
 
-                // SPOTIFY
-                if (command.includes("[SPOTIFY:")) {
-                    const term = command.match(/\[SPOTIFY: (.*?)\]/)[1];
-                    this.openUrl(`https://open.spotify.com/search/${encodeURIComponent(term)}`);
-                    return { type: 'music', text: `Abrindo Spotify: ${term}`, icon: 'music' };
-                }
+            try {
+                if (!navigator.gpu) throw new Error("Seu navegador não tem acesso à GPU (WebGPU).");
 
-                return null;
-            }
-
-            openUrl(url) {
-                // Em um app real (Capacitor), usariamos AppLauncher.openUrl
-                window.open(url, '_blank');
-            }
-        }
-
-        // ==========================================
-        // MÓDULO 3: NÚCLEO DA IA (Core.js)
-        // ==========================================
-        class NeuralCore {
-            constructor(memorySystem, networkAgent) {
-                this.engine = null;
-                this.memory = memorySystem;
-                this.network = networkAgent;
-                this.model = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
-                this.history = [];
-            }
-
-            async init(progressCallback) {
-                if (!navigator.gpu) throw new Error("Sem GPU detectada.");
-                
-                this.engine = await webllm.CreateMLCEngine(
-                    this.model,
+                // Inicializa Motor
+                engine = await webllm.CreateMLCEngine(
+                    MODEL_ID,
                     { 
-                        initProgressCallback: progressCallback,
-                        logLevel: "WARN",
-                        appConfig: { use_indexed_db_cache: true } // Cache Persistente
+                        appConfig: modelConfig, // Aqui está a correção do erro
+                        initProgressCallback: initProgressCallback,
+                        logLevel: "WARN"
                     }
                 );
 
-                // Warm-up
-                await this.engine.chat.completions.create({ messages: [{role:"user", content:"hi"}], max_tokens: 1 });
+                // Aquecimento (Warmup)
+                await engine.chat.completions.create({ messages: [{ role: "user", content: "hi" }], max_tokens: 1 });
+
+                // UI Ready
+                $('loading-screen').classList.add('opacity-0', 'pointer-events-none');
+                setTimeout(() => $('loading-screen').style.display = 'none', 500);
                 
-                // Prompt do Sistema Inteligente
-                this.history = [{ 
+                // Prompt do Sistema (Cérebro do OS)
+                chatHistory = [{ 
                     role: "system", 
                     content: `
-Você é o NeuralOS.
-Aja como um Sistema Operacional Inteligente.
-
-COMANDOS DE SISTEMA (Use Obrigatóriamente):
-- Para vídeos/música: [YOUTUBE: busca] ou [SPOTIFY: busca]
-- Para internet: [GOOGLE: busca]
-- Para salvar memória: [MEMORIA_SALVAR: texto]
-- Para ler memória: [MEMORIA_LER: termo]
-
-Estilo: Curto, direto e eficiente.
+Você é o NeuralOS. Um sistema operacional inteligente e prestativo.
+REGRAS:
+1. Responda sempre em Português do Brasil.
+2. Use formatação Markdown (negrito, listas) para clareza.
+3. Se o usuário pedir música/vídeo, use [YOUTUBE: busca].
+4. Se o usuário pedir pesquisa, use [GOOGLE: busca].
+5. Se o usuário contar algo pessoal, use [SALVAR_MEMORIA: texto].
+6. Se precisar lembrar de algo, use [LER_MEMORIA: termo].
 ` 
                 }];
-            }
 
-            async process(text) {
-                // 1. Adiciona usuário ao histórico
-                this.history.push({ role: "user", content: text });
-                if (this.history.length > 10) this.history.splice(1, 1);
-
-                // 2. Gera resposta
-                const reply = await this.engine.chat.completions.create({
-                    messages: this.history,
-                    temperature: 0.7,
-                    max_tokens: 1024,
-                    stream: false // Instantâneo
-                });
-
-                let responseText = reply.choices[0].message.content;
-                let actionResult = null;
-
-                // 3. Verifica Ações de Rede
-                const netAction = this.network.execute(responseText);
-                if (netAction) {
-                    responseText = netAction.text;
-                    actionResult = netAction;
-                }
-
-                // 4. Verifica Ações de Memória (Salvar)
-                if (responseText.includes("[MEMORIA_SALVAR:")) {
-                    const content = responseText.match(/\[MEMORIA_SALVAR: (.*?)\]/)[1];
-                    const id = this.memory.add(content);
-                    responseText = `💾 Salvo no Banco de Dados (ID #${id.toString().slice(-4)})`;
-                }
-
-                // 5. Verifica Ações de Memória (Ler/RAG)
-                if (responseText.includes("[MEMORIA_LER:")) {
-                    const term = responseText.match(/\[MEMORIA_LER: (.*?)\]/)[1];
-                    const results = this.memory.search(term);
-                    const context = JSON.stringify(results);
-                    
-                    // Injeta memória e pede nova resposta
-                    this.history.push({ role: "system", content: `DADOS ENCONTRADOS NO EXCEL: ${context}. Responda o usuário com base nisso.` });
-                    const ragReply = await this.engine.chat.completions.create({ messages: this.history });
-                    responseText = ragReply.choices[0].message.content;
-                }
-
-                // 6. Atualiza histórico da IA
-                this.history.push({ role: "assistant", content: responseText });
-
-                return { text: responseText, action: actionResult };
+            } catch (err) {
+                $('status-text').innerText = "Erro: " + err.message;
+                $('status-text').className = "text-red-400 text-xs font-mono mb-6 mt-2";
+                $('loading-bar').className = "h-full bg-red-600 transition-all duration-300 w-full";
+                console.error(err);
+                
+                // Botão de Reset de Emergência
+                const btn = document.createElement('button');
+                btn.innerText = "Limpar Cache e Tentar Novamente";
+                btn.className = "mt-4 bg-red-600 px-4 py-2 rounded text-white text-sm";
+                btn.onclick = () => { localStorage.clear(); location.reload(); };
+                $('loading-screen').appendChild(btn);
             }
         }
 
-        // ==========================================
-        // MÓDULO 4: CONTROLADOR UI (Main.js)
-        // ==========================================
-        class UIController {
-            constructor() {
-                this.memory = new MemorySystem();
-                this.network = new NetworkAgent();
-                this.core = new NeuralCore(this.memory, this.network);
-                
-                // Expor para window para o HTML acessar (onclicks)
-                window.ui = this; 
-                
-                this.setupEventListeners();
-                this.init();
-            }
+        // --- SISTEMA DE MEMÓRIA (Excel Simplificado) ---
+        function loadMemoryDB() {
+            try {
+                const saved = localStorage.getItem('neural_db_v3');
+                memoryDB = saved ? JSON.parse(saved) : [];
+            } catch(e) { memoryDB = []; }
+        }
 
-            async init() {
-                try {
-                    await this.core.init((report) => {
-                        const pct = report.text.match(/(\d+)%/) ? report.text.match(/(\d+)%/)[1] + "%" : "";
-                        $('loading-status').innerText = report.text.includes("Fetching") ? `Baixando IA (${pct})...` : `Carregando (${pct})...`;
-                        $('loading-bar').style.width = pct || "50%";
-                    });
+        function saveMemoryDB() {
+            localStorage.setItem('neural_db_v3', JSON.stringify(memoryDB));
+            renderDatabaseTable();
+        }
+
+        function addMemory(content, category = "Geral") {
+            const id = Date.now();
+            const date = new Date().toLocaleDateString('pt-BR');
+            memoryDB.unshift({ id, date, category, content });
+            saveMemoryDB();
+            return id;
+        }
+
+        window.deleteMemory = (id) => {
+            if(confirm("Deletar este registro?")) {
+                memoryDB = memoryDB.filter(i => i.id !== id);
+                saveMemoryDB();
+            }
+        };
+
+        window.updateMemory = (id, field, value) => {
+            const row = memoryDB.find(i => i.id === id);
+            if(row) {
+                row[field] = value;
+                saveMemoryDB();
+            }
+        };
+
+        function searchMemory(query) {
+            const term = query.toLowerCase();
+            return memoryDB.filter(row => 
+                row.content.toLowerCase().includes(term) || 
+                row.category.toLowerCase().includes(term)
+            ).slice(0, 3); // Top 3 resultados
+        }
+
+        // --- MOTOR DE CHAT E FERRAMENTAS ---
+        window.sendMessage = async () => {
+            const input = $('input-box');
+            const text = input.value.trim();
+            if (!text || !engine) return;
+
+            // 1. UI do Usuário
+            appendBubble('user', text);
+            input.value = '';
+            
+            // Adiciona ao histórico
+            chatHistory.push({ role: "user", content: text });
+            if (chatHistory.length > MAX_HISTORY) chatHistory.splice(1, 1);
+
+            // 2. Loading
+            const loadingId = showLoadingIndicator();
+            const scrollBox = $('chat-box');
+            scrollBox.scrollTo({ top: scrollBox.scrollHeight, behavior: 'smooth' });
+
+            try {
+                // 3. Processamento Neural
+                const reply = await engine.chat.completions.create({
+                    messages: chatHistory,
+                    temperature: 0.7,
+                    max_tokens: 1024,
+                    stream: false 
+                });
+
+                let responseText = reply.choices[0].message.content;
+                removeLoadingIndicator(loadingId);
+
+                // --- AGENTE DE FERRAMENTAS ---
+                
+                // Ação: Internet
+                if (responseText.includes("[YOUTUBE:")) {
+                    const term = responseText.match(/\[YOUTUBE: (.*?)\]/)[1];
+                    window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(term)}`, '_blank');
+                    responseText = `🎬 Abrindo YouTube para: **${term}**`;
+                }
+                else if (responseText.includes("[GOOGLE:")) {
+                    const term = responseText.match(/\[GOOGLE: (.*?)\]/)[1];
+                    window.open(`https://www.google.com/search?q=${encodeURIComponent(term)}`, '_blank');
+                    responseText = `🌐 Pesquisando no Google: **${term}**`;
+                }
+
+                // Ação: Memória (Salvar)
+                if (responseText.includes("[SALVAR_MEMORIA:")) {
+                    const content = responseText.match(/\[SALVAR_MEMORIA: (.*?)\]/)[1];
+                    addMemory(content);
+                    responseText = `💾 *Informação salva no banco de dados com sucesso.*`;
+                }
+
+                // Ação: Memória (Ler/RAG)
+                if (responseText.includes("[LER_MEMORIA:")) {
+                    const term = responseText.match(/\[LER_MEMORIA: (.*?)\]/)[1];
+                    const results = searchMemory(term);
                     
-                    // Esconde Loading
-                    $('loading-screen').classList.add('hidden');
-                    this.renderTable();
-                } catch (e) {
-                    $('loading-status').innerText = "Erro: " + e.message;
-                    $('loading-status').classList.add('text-red-500');
+                    if (results.length > 0) {
+                        const context = JSON.stringify(results);
+                        // Injeta conhecimento e pede nova resposta
+                        chatHistory.push({ role: "system", content: `CONTEXTO RECUPERADO DA MEMÓRIA: ${context}. Use isso para responder.` });
+                        const ragReply = await engine.chat.completions.create({ messages: chatHistory });
+                        responseText = ragReply.choices[0].message.content;
+                    } else {
+                        responseText = `Não encontrei nada sobre "${term}" na minha memória.`;
+                    }
                 }
+
+                // 4. UI da Resposta
+                appendBubble('assistant', responseText);
+                chatHistory.push({ role: "assistant", content: responseText });
+
+            } catch (e) {
+                removeLoadingIndicator(loadingId);
+                appendBubble('assistant', "Erro no processamento: " + e.message);
             }
+        };
 
-            setupEventListeners() {
-                $('send-btn').onclick = () => this.sendMessage();
-                $('input-box').onkeypress = (e) => { if(e.key === 'Enter') this.sendMessage() };
-                
-                // Tabs
-                $('btn-chat').onclick = () => this.switchTab('chat');
-                $('btn-db').onclick = () => this.switchTab('db');
-            }
+        // --- FUNÇÕES DE UI ---
+        function appendBubble(role, text) {
+            const box = $('chat-content'); // Container interno
+            const div = document.createElement('div');
+            const isUser = role === 'user';
+            
+            div.className = `flex w-full mb-4 animate-fade-in ${isUser ? 'justify-end' : 'justify-start'}`;
+            
+            const contentHtml = isUser ? text : marked.parse(text);
+            
+            div.innerHTML = `
+                <div class="max-w-[85%] p-4 rounded-2xl shadow-sm text-[15px] leading-relaxed ${
+                    isUser 
+                    ? 'bg-blue-600 text-white rounded-tr-sm' 
+                    : 'bg-gray-800 border border-gray-700 text-gray-200 rounded-tl-sm prose prose-invert'
+                }">
+                    ${contentHtml}
+                </div>
+            `;
+            box.appendChild(div);
+            // Scroll no pai
+            $('chat-box').scrollTo({ top: $('chat-box').scrollHeight, behavior: 'smooth' });
+        }
 
-            async sendMessage() {
-                const input = $('input-box');
-                const text = input.value.trim();
-                if (!text) return;
-
-                // UI Usuário
-                this.appendBubble('user', text);
-                input.value = '';
-
-                // UI Loading
-                const loadingId = this.showLoading();
-
-                // Processamento
-                const result = await this.core.process(text);
-
-                // UI Resposta
-                this.removeLoading(loadingId);
-                this.appendBubble('assistant', result.text);
-            }
-
-            appendBubble(role, text) {
-                const box = $('chat-box');
-                const div = document.createElement('div');
-                const isUser = role === 'user';
-                
-                div.className = `flex w-full mb-4 animate-fade-in ${isUser ? 'justify-end' : 'justify-start'}`;
-                
-                const contentHtml = isUser ? text : marked.parse(text);
-                
-                div.innerHTML = `
-                    <div class="max-w-[85%] p-4 rounded-2xl shadow-sm text-[15px] leading-relaxed ${
-                        isUser 
-                        ? 'bg-blue-600 text-white rounded-tr-sm' 
-                        : 'bg-gray-800 border border-gray-700 text-gray-200 rounded-tl-sm prose prose-invert'
-                    }">
-                        ${contentHtml}
+        function showLoadingIndicator() {
+            const id = 'load-' + Date.now();
+            const box = $('chat-content');
+            const div = document.createElement('div');
+            div.id = id;
+            div.className = 'flex w-full mb-4 justify-start animate-fade-in';
+            div.innerHTML = `
+                <div class="bg-gray-800 border border-gray-700 px-4 py-3 rounded-2xl rounded-tl-sm flex items-center gap-2">
+                    <div class="flex gap-1">
+                        <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                        <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce delay-75"></div>
+                        <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce delay-150"></div>
                     </div>
-                `;
-                box.appendChild(div);
-                box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
-            }
+                </div>`;
+            box.appendChild(div);
+            return id;
+        }
 
-            showLoading() {
-                const id = 'load-' + Date.now();
-                const box = $('chat-box');
-                const div = document.createElement('div');
-                div.id = id;
-                div.className = 'flex w-full mb-4 justify-start animate-fade-in';
-                div.innerHTML = `
-                    <div class="bg-gray-800 border border-gray-700 px-4 py-3 rounded-2xl rounded-tl-sm flex items-center gap-2">
-                        <div class="flex gap-1">
-                            <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
-                            <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce delay-75"></div>
-                            <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce delay-150"></div>
-                        </div>
-                    </div>`;
-                box.appendChild(div);
-                box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
-                return id;
-            }
+        function removeLoadingIndicator(id) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        }
 
-            removeLoading(id) {
-                const el = document.getElementById(id);
-                if (el) el.remove();
-            }
-
-            switchTab(tab) {
-                if (tab === 'chat') {
-                    $('view-chat').classList.remove('hidden');
-                    $('view-db').classList.add('hidden');
-                    $('btn-chat').classList.add('bg-blue-600', 'text-white');
-                    $('btn-chat').classList.remove('bg-gray-800', 'text-gray-400');
-                    $('btn-db').classList.remove('bg-blue-600', 'text-white');
-                    $('btn-db').classList.add('bg-gray-800', 'text-gray-400');
-                } else {
-                    $('view-chat').classList.add('hidden');
-                    $('view-db').classList.remove('hidden');
-                    $('btn-db').classList.add('bg-blue-600', 'text-white');
-                    $('btn-db').classList.remove('bg-gray-800', 'text-gray-400');
-                    $('btn-chat').classList.remove('bg-blue-600', 'text-white');
-                    $('btn-chat').classList.add('bg-gray-800', 'text-gray-400');
-                    this.renderTable();
-                }
-            }
-
-            // --- Lógica da Planilha Excel ---
-            renderTable() {
-                const tbody = $('table-body');
-                tbody.innerHTML = '';
-                const data = this.memory.db;
-
-                if (data.length === 0) {
-                    $('empty-state').classList.remove('hidden');
-                    return;
-                }
+        function renderDatabaseTable() {
+            const tbody = $('table-body');
+            tbody.innerHTML = '';
+            
+            if (memoryDB.length === 0) {
+                $('empty-state').classList.remove('hidden');
+            } else {
                 $('empty-state').classList.add('hidden');
-
-                data.forEach(row => {
+                
+                memoryDB.forEach(row => {
                     const tr = document.createElement('tr');
                     tr.className = "border-b border-gray-700 hover:bg-gray-750 group";
                     tr.innerHTML = `
                         <td class="p-3 text-gray-500 font-mono text-xs">${row.id.toString().slice(-4)}</td>
                         <td class="p-3 text-blue-400 text-xs">${row.date}</td>
                         <td class="p-3 text-gray-200">
-                            <input onchange="ui.updateCell(${row.id}, 'content', this.value)" 
+                            <input onchange="window.updateMemory(${row.id}, 'content', this.value)" 
                                    value="${row.content}" 
                                    class="bg-transparent w-full focus:outline-none focus:border-b border-blue-500">
                         </td>
                         <td class="p-3 text-gray-400">
-                            <input onchange="ui.updateCell(${row.id}, 'category', this.value)" 
+                            <input onchange="window.updateMemory(${row.id}, 'category', this.value)" 
                                    value="${row.category}" 
                                    class="bg-transparent w-full text-xs focus:outline-none focus:border-b border-blue-500">
                         </td>
                         <td class="p-3 text-right">
-                            <button onclick="ui.deleteItem(${row.id})" class="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-500/10 rounded">
+                            <button onclick="window.deleteMemory(${row.id})" class="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1">
                                 <i data-lucide="trash-2" class="w-4 h-4"></i>
                             </button>
                         </td>
                     `;
                     tbody.appendChild(tr);
                 });
-                lucide.createIcons();
-                $('record-count').innerText = `${data.length} registros`;
             }
-
-            updateCell(id, field, value) {
-                this.memory.edit(id, field, value);
-            }
-
-            deleteItem(id) {
-                if(confirm("Apagar linha?")) {
-                    this.memory.delete(id);
-                    this.renderTable();
-                }
-            }
+            lucide.createIcons();
+            $('record-count').innerText = `${memoryDB.length} registros`;
         }
 
-        // Helper
-        const $ = (id) => document.getElementById(id);
+        // Navegação entre Abas
+        window.switchTab = (tab) => {
+            if (tab === 'chat') {
+                $('view-chat').classList.remove('hidden');
+                $('view-db').classList.add('hidden');
+                $('btn-chat').classList.add('bg-blue-600', 'text-white');
+                $('btn-chat').classList.remove('bg-gray-800', 'text-gray-400');
+                $('btn-db').classList.remove('bg-blue-600', 'text-white');
+                $('btn-db').classList.add('bg-gray-800', 'text-gray-400');
+            } else {
+                $('view-chat').classList.add('hidden');
+                $('view-db').classList.remove('hidden');
+                $('btn-db').classList.add('bg-blue-600', 'text-white');
+                $('btn-db').classList.remove('bg-gray-800', 'text-gray-400');
+                $('btn-chat').classList.remove('bg-blue-600', 'text-white');
+                $('btn-chat').classList.add('bg-gray-800', 'text-gray-400');
+                renderDatabaseTable();
+            }
+        };
+
+        // Listeners
+        $('input-box').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') window.sendMessage();
+        });
 
         // Start
-        window.onload = () => new UIController();
+        window.onload = initSystem;
 
     </script>
     <style>
@@ -396,8 +359,8 @@ Estilo: Curto, direto e eficiente.
 </head>
 <body class="font-sans antialiased">
 
-    <!-- LOADING SCREEN -->
-    <div id="loading-screen" class="absolute inset-0 z-50 bg-[#0f172a] flex flex-col items-center justify-center p-8">
+    <!-- TELA DE CARREGAMENTO -->
+    <div id="loading-screen" class="absolute inset-0 z-50 bg-[#0f172a] flex flex-col items-center justify-center p-8 transition-opacity duration-500">
         <div class="relative w-20 h-20 mb-6">
             <div class="absolute inset-0 border-t-4 border-blue-500 rounded-full animate-spin"></div>
             <div class="absolute inset-2 border-r-4 border-purple-500 rounded-full animate-spin"></div>
@@ -405,14 +368,14 @@ Estilo: Curto, direto e eficiente.
                 <i data-lucide="cpu" class="w-8 h-8 text-white"></i>
             </div>
         </div>
-        <h2 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">NeuralOS v2.0</h2>
-        <p id="loading-status" class="text-gray-400 text-xs font-mono mb-6 mt-2">Carregando Módulos...</p>
+        <h2 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">NeuralOS v2.1</h2>
+        <p id="status-text" class="text-gray-400 text-xs font-mono mb-6 mt-2">Inicializando...</p>
         <div class="w-48 h-1 bg-gray-800 rounded-full overflow-hidden">
             <div id="loading-bar" class="h-full bg-blue-500 transition-all duration-300 w-0"></div>
         </div>
     </div>
 
-    <!-- MAIN APP STRUCTURE -->
+    <!-- APP PRINCIPAL -->
     <div class="flex-1 flex flex-col relative overflow-hidden">
         
         <!-- HEADER -->
@@ -423,47 +386,49 @@ Estilo: Curto, direto e eficiente.
                 </div>
                 <div>
                     <h1 class="font-bold text-sm tracking-wide">Neural<span class="text-blue-400">OS</span></h1>
-                    <span class="text-[10px] text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded border border-gray-700">MODULAR</span>
+                    <span class="text-[10px] text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded border border-gray-700">STABLE</span>
                 </div>
             </div>
             
             <div class="flex bg-gray-800 p-1 rounded-lg gap-1">
-                <button id="btn-chat" class="px-3 py-1.5 rounded-md text-xs font-bold bg-blue-600 text-white flex items-center gap-2 transition-all">
+                <button id="btn-chat" onclick="switchTab('chat')" class="px-3 py-1.5 rounded-md text-xs font-bold bg-blue-600 text-white flex items-center gap-2 transition-all">
                     <i data-lucide="message-square" class="w-3 h-3"></i> Chat
                 </button>
-                <button id="btn-db" class="px-3 py-1.5 rounded-md text-xs font-bold bg-gray-800 text-gray-400 hover:text-white flex items-center gap-2 transition-all">
+                <button id="btn-db" onclick="switchTab('db')" class="px-3 py-1.5 rounded-md text-xs font-bold bg-gray-800 text-gray-400 hover:text-white flex items-center gap-2 transition-all">
                     <i data-lucide="sheet" class="w-3 h-3"></i> Excel
                 </button>
             </div>
         </header>
 
-        <!-- VIEW: CHAT -->
+        <!-- ABA: CHAT -->
         <div id="view-chat" class="flex-1 flex flex-col relative overflow-hidden">
-            <div id="chat-box" class="flex-1 overflow-y-auto p-4 pb-24 scroll-smooth">
-                <!-- Welcome -->
-                <div class="flex justify-center mt-6">
-                    <span class="text-[10px] text-gray-500 bg-gray-800/50 px-3 py-1 rounded-full border border-gray-700">
-                        Sistema Pronto • Memória Conectada • Web Ativa
-                    </span>
+            <div id="chat-box" class="flex-1 overflow-y-auto pb-24 scroll-smooth">
+                <div id="chat-content" class="p-4 pt-6">
+                    <!-- Mensagens entram aqui -->
+                    <div class="flex justify-center mb-4">
+                        <span class="text-[10px] text-gray-500 bg-gray-800/50 px-3 py-1 rounded-full border border-gray-700">
+                            Sistema Online • Llama 3.2 3B
+                        </span>
+                    </div>
                 </div>
             </div>
 
-            <!-- Input Flutuante -->
+            <!-- Input -->
             <div class="absolute bottom-0 w-full p-4 bg-gradient-to-t from-[#0f172a] via-[#0f172a] to-transparent z-10">
                 <div class="flex items-center gap-2 bg-[#1e293b] border border-gray-700 p-2 rounded-full shadow-2xl">
-                    <input id="input-box" type="text" class="flex-1 bg-transparent px-4 py-2 text-sm text-white focus:outline-none placeholder-gray-500" placeholder="Digite: Tocar Rock, Salvar nota...">
-                    <button id="send-btn" class="w-10 h-10 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center text-white shadow-lg transition-transform active:scale-95">
+                    <input id="input-box" type="text" class="flex-1 bg-transparent px-4 py-2 text-sm text-white focus:outline-none placeholder-gray-500" placeholder="Digite aqui...">
+                    <button onclick="window.sendMessage()" class="w-10 h-10 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center text-white shadow-lg transition-transform active:scale-95">
                         <i data-lucide="send" class="w-4 h-4 ml-0.5"></i>
                     </button>
                 </div>
             </div>
         </div>
 
-        <!-- VIEW: DATABASE (Excel) -->
+        <!-- ABA: BANCO DE DADOS -->
         <div id="view-db" class="hidden flex-1 flex flex-col bg-[#0f172a] overflow-hidden">
             <div class="p-3 bg-[#1e293b] border-b border-gray-700 flex justify-between items-center">
                 <h2 class="text-xs font-bold text-gray-300 flex items-center gap-2">
-                    <i data-lucide="database" class="w-3 h-3 text-blue-400"></i> BANCO DE DADOS
+                    <i data-lucide="database" class="w-3 h-3 text-blue-400"></i> MEMÓRIA
                 </h2>
                 <span id="record-count" class="text-[10px] text-gray-500 font-mono">0 registros</span>
             </div>
@@ -474,19 +439,19 @@ Estilo: Curto, direto e eficiente.
                         <tr>
                             <th class="p-3 w-16 border-b border-gray-700">ID</th>
                             <th class="p-3 w-24 border-b border-gray-700">Data</th>
-                            <th class="p-3 border-b border-gray-700">Conteúdo (Editável)</th>
+                            <th class="p-3 border-b border-gray-700">Conteúdo</th>
                             <th class="p-3 w-32 border-b border-gray-700">Categoria</th>
                             <th class="p-3 w-10 border-b border-gray-700"></th>
                         </tr>
                     </thead>
                     <tbody id="table-body" class="text-sm divide-y divide-gray-800">
-                        <!-- Rows -->
+                        <!-- Linhas -->
                     </tbody>
                 </table>
 
                 <div id="empty-state" class="hidden flex flex-col items-center justify-center mt-20 opacity-50">
                     <i data-lucide="table" class="w-12 h-12 text-gray-600 mb-2"></i>
-                    <p class="text-sm text-gray-400">Tabela vazia.</p>
+                    <p class="text-sm text-gray-400">Nada salvo.</p>
                 </div>
             </div>
         </div>
