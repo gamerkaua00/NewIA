@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <title>NeuralOS v7.4 - Fixed</title>
+    <title>NeuralOS v7.5 - Stable</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- jsPDF Leve e Rápido -->
+    <!-- jsPDF (Versão Global Compatível) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     
     <!-- Python Engine -->
@@ -32,7 +32,7 @@
         let currentCanvasCode = ""; 
         let pyodideInstance = null;
         
-        // Carregamento de Configurações (Com tratamento de erro)
+        // Carregamento de Configurações (Robusto)
         let userConfig = {
             name: 'Usuário',
             vibe: 'Assistente Padrão',
@@ -41,15 +41,20 @@
             amoled: false
         };
 
-        try {
-            if(localStorage.getItem('neural_user_name')) userConfig.name = localStorage.getItem('neural_user_name');
-            if(localStorage.getItem('neural_ai_vibe')) userConfig.vibe = localStorage.getItem('neural_ai_vibe');
-            if(localStorage.getItem('neural_tts')) userConfig.ttsEnabled = localStorage.getItem('neural_tts') === 'true';
-            if(localStorage.getItem('neural_voice_idx')) userConfig.voiceIndex = parseInt(localStorage.getItem('neural_voice_idx'));
-            if(localStorage.getItem('neural_amoled')) userConfig.amoled = localStorage.getItem('neural_amoled') === 'true';
-        } catch(e) {
-            console.warn("Erro ao ler localStorage (Modo Anônimo?):", e);
+        // Função segura para ler do storage
+        function loadConfigs() {
+            try {
+                if(localStorage.getItem('neural_user_name')) userConfig.name = localStorage.getItem('neural_user_name');
+                if(localStorage.getItem('neural_ai_vibe')) userConfig.vibe = localStorage.getItem('neural_ai_vibe');
+                if(localStorage.getItem('neural_tts')) userConfig.ttsEnabled = localStorage.getItem('neural_tts') === 'true';
+                if(localStorage.getItem('neural_voice_idx')) userConfig.voiceIndex = parseInt(localStorage.getItem('neural_voice_idx'));
+                if(localStorage.getItem('neural_amoled')) userConfig.amoled = localStorage.getItem('neural_amoled') === 'true';
+                console.log("Configs carregadas:", userConfig);
+            } catch(e) {
+                console.warn("Erro ao ler configurações:", e);
+            }
         }
+        loadConfigs(); // Executa imediatamente
 
         const $ = (id) => document.getElementById(id);
 
@@ -61,13 +66,12 @@
             const inputWrapper = $('input-wrapper');
             const headers = document.querySelectorAll('header');
             const modals = document.querySelectorAll('.modal-bg');
-            const canvasModal = $('canvas-modal-header');
             const inputBox = $('input-box');
             
-            if (!body) return; // Segurança
+            if (!body) return;
 
             if (userConfig.amoled) {
-                // MODO ESCURO
+                // MODO ESCURO (Preto Real)
                 body.className = "font-sans antialiased bg-black text-gray-200 h-full w-full overflow-hidden flex flex-col";
                 if(appContainer) appContainer.className = "flex-1 flex flex-col relative overflow-hidden max-w-md mx-auto w-full h-full shadow-2xl bg-black border-x border-gray-800";
                 
@@ -197,15 +201,21 @@
             $('fix-code-btn').classList.add('hidden');
         };
 
-        // --- SISTEMA DE PDF (jsPDF Otimizado) ---
+        // --- SISTEMA DE PDF (jsPDF Otimizado e Assíncrono) ---
         const Tools = {
             generatePDF: async (title, content) => {
                 showToast("Gerando PDF...");
                 
-                // Usando setTimeout para não bloquear a thread principal
+                // Retorna uma Promise para garantir que o await no sendMessage funcione
                 return new Promise((resolve) => {
                     setTimeout(() => {
                         try {
+                            // Verifica se jsPDF carregou
+                            if (!window.jspdf || !window.jspdf.jsPDF) {
+                                resolve("Erro: Biblioteca PDF não carregada. Tente recarregar.");
+                                return;
+                            }
+
                             const { jsPDF } = window.jspdf;
                             const doc = new jsPDF();
                             
@@ -219,7 +229,6 @@
                             doc.setTextColor(40, 40, 40);
                             doc.text(title || "Documento NeuralOS", margin, 20);
                             
-                            // Linha separadora
                             doc.setLineWidth(0.5);
                             doc.line(margin, 25, pageWidth - margin, 25);
                             
@@ -227,9 +236,7 @@
                             doc.setFontSize(12);
                             doc.setTextColor(60, 60, 60);
                             
-                            // Remove caracteres Markdown que sujam o PDF
                             const cleanContent = content.replace(/\*\*/g, "").replace(/#/g, "").replace(/`/g, "");
-                            
                             const lines = doc.splitTextToSize(cleanContent, maxLineWidth);
                             
                             let cursorY = 35;
@@ -244,14 +251,15 @@
                                 cursorY += lineHeight;
                             });
                             
-                            const fileName = `${(title || 'doc').substring(0, 10)}.pdf`;
+                            const fileName = `${(title || 'doc').substring(0, 15).replace(/[^a-z0-9]/gi, '_')}.pdf`;
                             doc.save(fileName);
+                            
                             resolve(`PDF "${fileName}" baixado com sucesso.`);
                         } catch (e) {
                             console.error(e);
                             resolve("Erro ao criar PDF: " + e.message);
                         }
-                    }, 100);
+                    }, 500); // Pequeno delay para garantir que o toast apareça
                 });
             },
             
@@ -313,10 +321,10 @@
             chatHistory[0] = { 
                 role: "system", 
                 content: `
-Você é o NeuralOS v7.4. USUÁRIO: ${userConfig.name}. PERSONALIDADE: ${persona}.
+Você é o NeuralOS v7.5. USUÁRIO: ${userConfig.name}. PERSONALIDADE: ${persona}.
 DIRETRIZES:
 1. Pense antes de responder: <pensamento>...</pensamento>.
-2. Ferramentas: [PDF: titulo | conteudo], [PYTHON: codigo], [ALERTA: min | texto], [IMG: prompt], [CLIMA: cidade], [WIKI: termo], [MEM: fato], [YOUTUBE: termo].
+2. Ferramentas: [PDF: titulo | conteudo], [PYTHON: codigo], [ALERTA: min | texto], [IMG: prompt], [CLIMA: cidade], [WIKI: termo], [MEM: fato], [YOUTUBE: termo], [GOOGLE: termo].
 3. Códigos visuais em \`\`\`html.
 ` 
             };
@@ -324,9 +332,6 @@ DIRETRIZES:
 
         async function initSystem() {
             applyTheme(); // Aplica tema visual imediatamente
-            
-            // Verifica se as configs foram carregadas
-            if(userConfig.name !== 'Usuário') showToast(`Bem-vindo de volta, ${userConfig.name}`);
             
             const wakeUpPromise = DB.wakeUp();
             updateSystemPrompt(); 
@@ -357,6 +362,11 @@ DIRETRIZES:
                 setTimeout(() => $('loading-screen').style.display = 'none', 500);
                 lucide.createIcons();
                 loadVoices();
+                
+                // Aviso de boas vindas com configurações carregadas
+                if (userConfig.name !== "Usuário") {
+                    showToast(`Configurações carregadas: ${userConfig.name}`);
+                }
 
             } catch (err) {
                 $('status-text').innerText = "Erro: " + err.message;
@@ -410,9 +420,18 @@ DIRETRIZES:
                     updateLoading(loadingId, "Gerando PDF...");
                     const match = final.match(/\[PDF: (.*?)\s*\|\s*([\s\S]*?)\]/);
                     if (match) {
-                        toolResult = await Tools.generatePDF(match[1], match[2]);
-                        final = final.replace(/\[PDF:.*?\]/s, `📄 ${toolResult}`);
-                    } else { toolResult = "Erro formato PDF."; }
+                        // Await garante que o PDF termine antes de seguir
+                        const result = await Tools.generatePDF(match[1], match[2]);
+                        
+                        // CORREÇÃO: Remove o loading imediatamente após gerar o PDF e encerra o fluxo
+                        removeLoading(loadingId);
+                        appendBubble('assistant', `📄 ${result}`);
+                        chatHistory.push({ role: "user", content: text });
+                        chatHistory.push({ role: "assistant", content: `Gerei o PDF "${match[1]}".` });
+                        return; // SAI DA FUNÇÃO PARA NÃO TRAVAR
+                    } else { 
+                        toolResult = "Erro formato PDF."; 
+                    }
                 }
                 else if (final.includes("[PYTHON:")) {
                     updateLoading(loadingId, "Rodando Python...");
@@ -457,9 +476,10 @@ DIRETRIZES:
                     final = `🌐 Google: **${t}**`;
                 }
 
+                // Se houver ferramenta (que não seja PDF pois já retornou), continua o fluxo
                 if (toolResult) {
                     tempHistory.push({ role: "assistant", content: raw });
-                    tempHistory.push({ role: "user", content: `Sistema: ${toolResult}. Continue.` });
+                    tempHistory.push({ role: "user", content: `Resultado Sistema: ${toolResult}. Continue.` });
                     const step2 = await engine.chat.completions.create({ messages: tempHistory });
                     final = step2.choices[0].message.content.replace(/<pensamento>.*?<\/pensamento>/s, "").trim();
                 }
@@ -638,7 +658,6 @@ DIRETRIZES:
         };
         window.triggerFileUpload = () => $('file-upload').click();
         $('input-box').addEventListener('keypress', (e) => { if (e.key === 'Enter') window.sendMessage(); });
-        
         window.onload = initSystem;
     </script>
     <style>
@@ -649,21 +668,30 @@ DIRETRIZES:
 </head>
 <body class="font-sans antialiased bg-slate-50 text-slate-800 transition-colors duration-300 h-full w-full overflow-hidden flex flex-col">
 
-    <!-- MODAIS E COMPONENTES AUXILIARES MANTIDOS (Canvas, Settings, Loading) -->
-    <!-- [Canvas Modal] -->
+    <!-- CANVAS MODAL (Com Logs) -->
     <div id="canvas-modal" class="hidden fixed inset-0 z-50 bg-black flex flex-col animate-fade-in">
         <div id="canvas-modal-header" class="h-12 bg-gray-900 flex items-center justify-between px-4 border-b border-gray-800 shrink-0">
-            <h3 id="canvas-title" class="text-white text-sm font-bold flex items-center gap-2"><i data-lucide="layout" class="w-4 h-4 text-green-400"></i> Canvas Pro</h3>
+            <h3 id="canvas-title" class="text-white text-sm font-bold flex items-center gap-2">
+                <i data-lucide="layout" class="w-4 h-4 text-green-400"></i> Canvas Pro
+            </h3>
             <div class="flex gap-2">
-                <button id="fix-code-btn" onclick="fixCanvasCode()" class="hidden bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs font-bold flex items-center gap-1"><i data-lucide="wrench" class="w-3 h-3"></i> Corrigir Erro</button>
-                <button onclick="closeCanvas()" class="text-gray-400 hover:text-white p-2"><i data-lucide="x" class="w-5 h-5"></i></button>
+                <button id="fix-code-btn" onclick="fixCanvasCode()" class="hidden bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs font-bold flex items-center gap-1">
+                    <i data-lucide="wrench" class="w-3 h-3"></i> Corrigir Erro
+                </button>
+                <button onclick="closeCanvas()" class="text-gray-400 hover:text-white p-2">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
             </div>
         </div>
+        <!-- Área de Preview -->
         <div id="canvas-container" class="flex-1 w-full bg-white relative"></div>
-        <div class="h-32 bg-gray-950 border-t border-gray-800 p-2 overflow-y-auto font-mono text-[10px] shrink-0" id="canvas-console"><div class="text-gray-600 italic">Console pronto...</div></div>
+        <!-- Área de Logs -->
+        <div class="h-32 bg-gray-950 border-t border-gray-800 p-2 overflow-y-auto font-mono text-[10px] shrink-0" id="canvas-console">
+            <div class="text-gray-600 italic">Console pronto...</div>
+        </div>
     </div>
 
-    <!-- [Settings Modal] -->
+    <!-- SETTINGS MODAL -->
     <div id="settings-modal" class="hidden absolute inset-0 z-40 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm modal-bg">
         <div class="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl modal-bg">
             <h2 class="text-lg font-bold mb-4">Ajustes</h2>
@@ -684,12 +712,16 @@ DIRETRIZES:
         </div>
     </div>
 
-    <!-- [Loading Screen] -->
+    <!-- LOADING SCREEN -->
     <div id="loading-screen" class="absolute inset-0 z-50 bg-white flex flex-col items-center justify-center p-8 transition-opacity duration-500">
-        <div class="w-20 h-20 mb-6 rounded-3xl bg-indigo-600 flex items-center justify-center shadow-xl animate-bounce"><i data-lucide="cpu" class="text-white w-10 h-10"></i></div>
-        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v7.4</span></h2>
+        <div class="w-20 h-20 mb-6 rounded-3xl bg-indigo-600 flex items-center justify-center shadow-xl animate-bounce">
+            <i data-lucide="cpu" class="text-white w-10 h-10"></i>
+        </div>
+        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v7.5</span></h2>
         <p id="status-text" class="text-gray-400 text-xs font-mono mb-8">Iniciando...</p>
-        <div class="w-48 h-1.5 bg-gray-100 rounded-full overflow-hidden"><div id="loading-bar" class="h-full bg-indigo-600 transition-all duration-300 w-0"></div></div>
+        <div class="w-48 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div id="loading-bar" class="h-full bg-indigo-600 transition-all duration-300 w-0"></div>
+        </div>
     </div>
 
     <!-- MAIN APP STRUCTURE -->
