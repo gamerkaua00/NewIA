@@ -3,11 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <title>NeuralOS v6 - Canvas</title>
+    <title>NeuralOS v7 - Developer</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PDF Generator -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     
     <script type="module">
         import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.72/+esm";
@@ -24,9 +26,10 @@
         let isOfflineMode = false;
         let recognition = null;
         let availableVoices = [];
+        let currentCanvasCode = ""; // Guarda o código atual para correções
         
         let userConfig = {
-            name: localStorage.getItem('neural_user_name') || 'Usuário',
+            name: localStorage.getItem('neural_user_name') || 'Admin',
             vibe: localStorage.getItem('neural_ai_vibe') || 'Assistente Padrão',
             ttsEnabled: localStorage.getItem('neural_tts') === 'true',
             voiceIndex: parseInt(localStorage.getItem('neural_voice_idx') || '0'),
@@ -35,86 +38,114 @@
 
         const $ = (id) => document.getElementById(id);
 
-        // --- SISTEMA DE ÁUDIO (Vozes Múltiplas) ---
+        // --- SISTEMA DE TEMA (CORRIGIDO) ---
+        function applyTheme() {
+            const body = document.body;
+            const appContainer = $('main-app-container');
+            const inputContainer = $('input-container');
+            const inputWrapper = $('input-wrapper');
+            const headers = document.querySelectorAll('header');
+            const modals = document.querySelectorAll('.modal-bg');
+            
+            if (userConfig.amoled) {
+                // Modo Escuro Real
+                body.className = "font-sans antialiased bg-black text-gray-200 h-full w-full overflow-hidden flex flex-col";
+                appContainer.className = appContainer.className.replace('bg-white', 'bg-black').replace('border-gray-100', 'border-gray-800');
+                
+                // Input Bar (Correção Crítica)
+                inputContainer.classList.replace('bg-white', 'bg-black');
+                inputContainer.classList.replace('border-gray-100', 'border-gray-800');
+                inputWrapper.className = "flex items-center gap-2 border p-1.5 pl-2 rounded-full shadow-sm bg-gray-900 border-gray-700";
+                
+                // Headers
+                headers.forEach(h => h.className = h.className.replace('bg-white/90', 'bg-black/90').replace('border-gray-100', 'border-gray-800'));
+                
+                // Modals
+                modals.forEach(m => m.classList.replace('bg-white', 'bg-gray-900'));
+                
+                $('input-box').classList.replace('text-gray-800', 'text-white');
+                $('input-box').classList.replace('placeholder-gray-400', 'placeholder-gray-600');
+            } else {
+                // Modo Claro
+                body.className = "font-sans antialiased bg-slate-50 text-slate-800 h-full w-full overflow-hidden flex flex-col";
+                appContainer.className = appContainer.className.replace('bg-black', 'bg-white').replace('border-gray-800', 'border-gray-100');
+                
+                inputContainer.classList.replace('bg-black', 'bg-white');
+                inputContainer.classList.replace('border-gray-800', 'border-gray-100');
+                inputWrapper.className = "flex items-center gap-2 border p-1.5 pl-2 rounded-full shadow-sm bg-white border-gray-200";
+                
+                headers.forEach(h => h.className = h.className.replace('bg-black/90', 'bg-white/90').replace('border-gray-800', 'border-gray-100'));
+                
+                modals.forEach(m => m.classList.replace('bg-gray-900', 'bg-white'));
+                
+                $('input-box').classList.replace('text-white', 'text-gray-800');
+                $('input-box').classList.replace('placeholder-gray-600', 'placeholder-gray-400');
+            }
+        }
+
+        // --- SISTEMA DE ÁUDIO ---
         function loadVoices() {
             availableVoices = window.speechSynthesis.getVoices();
             const voiceSelect = $('select-voice');
             voiceSelect.innerHTML = '';
-            
-            // Filtra vozes PT-BR ou usa todas se não achar
             const ptVoices = availableVoices.filter(v => v.lang.includes('pt') || v.lang.includes('BR'));
             const voicesToUse = ptVoices.length > 0 ? ptVoices : availableVoices;
-
             voicesToUse.forEach((voice, index) => {
                 const option = document.createElement('option');
                 option.value = index; 
-                option.textContent = `${voice.name} (${voice.lang})`;
+                option.textContent = `${voice.name}`;
                 if(voice.name === availableVoices[userConfig.voiceIndex]?.name) option.selected = true;
                 voiceSelect.appendChild(option);
             });
         }
         window.speechSynthesis.onvoiceschanged = loadVoices;
 
-        function setupAudio() {
-            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                recognition = new SpeechRecognition();
-                recognition.lang = 'pt-BR';
-                recognition.continuous = false;
-                recognition.interimResults = false;
-
-                recognition.onstart = () => {
-                    $('mic-btn').classList.replace('bg-gray-100', 'bg-red-500');
-                    $('mic-btn').classList.replace('text-gray-500', 'text-white');
-                    $('mic-btn').classList.add('animate-pulse');
-                    $('input-box').placeholder = "Ouvindo...";
-                };
-                recognition.onend = () => {
-                    $('mic-btn').classList.replace('bg-red-500', 'bg-gray-100');
-                    $('mic-btn').classList.replace('text-white', 'text-gray-500');
-                    $('mic-btn').classList.remove('animate-pulse');
-                    $('input-box').placeholder = "Digite...";
-                };
-                recognition.onresult = (event) => {
-                    $('input-box').value = event.results[0][0].transcript;
-                    window.sendMessage();
-                };
-            } else { $('mic-btn').style.display = 'none'; }
-        }
-
         function speak(text) {
             if (!userConfig.ttsEnabled || !text) return;
             const cleanText = text.replace(/[*#_\[\]`]/g, '').replace(/https?:\/\/\S+/g, 'link');
             const utterance = new SpeechSynthesisUtterance(cleanText);
-            
             if (availableVoices.length > 0) {
                 const ptVoices = availableVoices.filter(v => v.lang.includes('pt') || v.lang.includes('BR'));
                 const voicesList = ptVoices.length > 0 ? ptVoices : availableVoices;
                 utterance.voice = voicesList[userConfig.voiceIndex] || availableVoices[0];
             }
-            
             utterance.rate = 1.1; 
             window.speechSynthesis.cancel(); 
             window.speechSynthesis.speak(utterance);
         }
 
-        // --- SISTEMA CANVAS (Preview Imersivo) ---
+        // --- SISTEMA CANVAS PRO (Com Logs) ---
         window.openCanvas = (code, type) => {
+            currentCanvasCode = code; // Salva para correções
             const modal = $('canvas-modal');
             const container = $('canvas-container');
+            const consoleDiv = $('canvas-console');
             const title = $('canvas-title');
             
-            container.innerHTML = ''; // Limpa
-            title.innerText = type === 'html' ? 'Preview Web' : 'Visualizador de Código';
+            container.innerHTML = ''; 
+            consoleDiv.innerHTML = '<div class="text-gray-500 italic">Console pronto...</div>'; // Reset logs
+            title.innerText = type === 'html' ? 'App Preview' : 'Código';
             
             if (type === 'html') {
                 const iframe = document.createElement('iframe');
                 iframe.className = "w-full h-full bg-white rounded-lg border-0";
                 container.appendChild(iframe);
                 
+                // Injeta script de captura de erro
+                const errorCaptureScript = `
+                    <script>
+                        window.onerror = function(message, source, lineno, colno, error) {
+                            window.parent.postMessage({type: 'error', message: message, line: lineno}, '*');
+                        };
+                        console.log = function(message) {
+                            window.parent.postMessage({type: 'log', message: message}, '*');
+                        };
+                    <\/script>
+                `;
+                
                 const doc = iframe.contentWindow.document;
                 doc.open();
-                doc.write(code);
+                doc.write(errorCaptureScript + code);
                 doc.close();
             } else {
                 const pre = document.createElement('pre');
@@ -126,122 +157,55 @@
             modal.classList.remove('hidden');
         };
 
+        // Listener de mensagens do Iframe (Logs)
+        window.addEventListener('message', (event) => {
+            const consoleDiv = $('canvas-console');
+            if (event.data.type === 'error') {
+                consoleDiv.innerHTML += `<div class="text-red-400 mt-1">❌ Erro (L${event.data.line}): ${event.data.message}</div>`;
+                $('fix-code-btn').classList.remove('hidden'); // Mostra botão de corrigir
+                $('fix-code-btn').dataset.error = event.data.message;
+            } else if (event.data.type === 'log') {
+                consoleDiv.innerHTML += `<div class="text-blue-300 mt-1">ℹ️ ${event.data.message}</div>`;
+            }
+        });
+
+        window.fixCanvasCode = () => {
+            const errorMsg = $('fix-code-btn').dataset.error;
+            closeCanvas();
+            // Manda para o chat como se fosse o usuário pedindo
+            const prompt = `O código gerado deu este erro: "${errorMsg}". Por favor, corrija o código abaixo e execute novamente:\n\n${currentCanvasCode}`;
+            $('input-box').value = prompt;
+            window.sendMessage();
+        };
+
         window.closeCanvas = () => {
             $('canvas-modal').classList.add('hidden');
             $('canvas-container').innerHTML = ''; 
+            $('fix-code-btn').classList.add('hidden');
         };
 
-        // --- CONFIGURAÇÕES ---
-        window.toggleSettings = () => {
-            $('settings-modal').classList.toggle('hidden');
-            $('input-name').value = userConfig.name;
-            $('select-vibe').value = userConfig.vibe;
-            $('check-tts').checked = userConfig.ttsEnabled;
-            $('check-amoled').checked = userConfig.amoled;
-            loadVoices(); 
-        };
-
-        window.saveSettings = () => {
-            userConfig.name = $('input-name').value;
-            userConfig.vibe = $('select-vibe').value;
-            userConfig.ttsEnabled = $('check-tts').checked;
-            userConfig.voiceIndex = $('select-voice').selectedIndex;
-            userConfig.amoled = $('check-amoled').checked;
-            
-            localStorage.setItem('neural_user_name', userConfig.name);
-            localStorage.setItem('neural_ai_vibe', userConfig.vibe);
-            localStorage.setItem('neural_tts', userConfig.ttsEnabled);
-            localStorage.setItem('neural_voice_idx', userConfig.voiceIndex);
-            localStorage.setItem('neural_amoled', userConfig.amoled);
-            
-            applyTheme();
-            updateSystemPrompt();
-            $('settings-modal').classList.add('hidden');
-            showToast("Configurações salvas!");
-        };
-
-        function applyTheme() {
-            const body = document.body;
-            const headers = document.querySelectorAll('header');
-            
-            if (userConfig.amoled) {
-                body.className = "font-sans antialiased bg-black text-gray-200 h-full w-full overflow-hidden flex flex-col";
-                headers.forEach(h => h.className = h.className.replace('bg-white/90', 'bg-black/90').replace('border-gray-100', 'border-gray-800'));
-                // Atualiza background do container principal se necessário
-                $('main-app-container').classList.replace('bg-white', 'bg-black');
-                $('main-app-container').classList.replace('border-gray-100', 'border-gray-900');
-            } else {
-                body.className = "font-sans antialiased bg-slate-50 text-slate-800 h-full w-full overflow-hidden flex flex-col";
-                $('main-app-container').classList.replace('bg-black', 'bg-white');
-                $('main-app-container').classList.replace('border-gray-900', 'border-gray-100');
-            }
-        }
-
-        // --- BANCO DE DADOS HÍBRIDO ---
-        const DB = {
-            wakeUp: async () => {
-                if (!RENDER_API_URL || isOfflineMode) return false;
-                $('status-indicator').innerHTML = '<span class="animate-pulse">⏳</span>';
-                try {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 60000); 
-                    const res = await fetch(`${RENDER_API_URL}/wake-up`, { signal: controller.signal });
-                    clearTimeout(timeoutId);
-                    if (res.ok) { 
-                        isOnlineDB = true; 
-                        $('status-indicator').innerText = "● Online";
-                        $('status-indicator').className = "text-[10px] text-green-500 font-bold cursor-pointer";
-                        return true; 
-                    }
-                } catch (e) {}
-                isOnlineDB = false;
-                $('status-indicator').innerText = "● Local";
-                $('status-indicator').className = "text-[10px] text-red-500 font-bold cursor-pointer";
-                return false;
-            },
-            retryConnection: async () => {
-                showToast("Reconectando...");
-                await DB.wakeUp();
-                DB.refreshList();
-            },
-            add: async (text) => {
-                const entry = { content: text, date: new Date().toISOString() };
-                if (isOnlineDB && !isOfflineMode) {
-                    try { fetch(`${RENDER_API_URL}/memories`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(entry) }); } catch(e){}
-                } 
-                const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
-                local.unshift({ ...entry, id: Date.now() });
-                localStorage.setItem('neural_local_db', JSON.stringify(local));
-                showToast("🧠 Memória Salva");
-                DB.refreshList();
-            },
-            search: async (term) => {
-                const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
-                return local.filter(m => m.content.toLowerCase().includes(term.toLowerCase())).map(m => m.content).slice(0, 3);
-            },
-            refreshList: async () => {
-                const list = $('memory-list');
-                let items = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
-                if (isOnlineDB && !isOfflineMode) {
-                    try {
-                        const res = await fetch(`${RENDER_API_URL}/memories`);
-                        if(res.ok) items = await res.json();
-                    } catch(e) {}
-                }
-                $('mem-count').innerText = items.length;
-                list.innerHTML = items.length ? '' : '<div class="text-center text-gray-500 text-xs mt-10">Vazio</div>';
-                items.forEach(item => {
-                    const el = document.createElement('div');
-                    const bgClass = userConfig.amoled ? 'bg-gray-900 border-gray-800 text-gray-300' : 'bg-white border-gray-100 text-gray-700';
-                    el.className = `${bgClass} p-3 rounded-lg border shadow-sm mb-2 text-sm`;
-                    el.innerHTML = `<div class="font-medium">${item.content}</div><div class="text-[10px] opacity-60 mt-1">${new Date(item.date).toLocaleDateString()}</div>`;
-                    list.appendChild(el);
-                });
-            }
-        };
-
-        // --- WEB & TOOLS ---
+        // --- SISTEMA DE PDF (Real Client-Side) ---
         const Tools = {
+            generatePDF: async (title, content) => {
+                try {
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF();
+                    
+                    // Configuração básica
+                    doc.setFontSize(18);
+                    doc.text(title || "Documento NeuralOS", 10, 10);
+                    
+                    doc.setFontSize(12);
+                    // Quebra o texto para caber na página
+                    const splitText = doc.splitTextToSize(content, 180);
+                    doc.text(splitText, 10, 20);
+                    
+                    doc.save(`${title.replace(/\s+/g, '_')}.pdf`);
+                    return "PDF gerado e baixado com sucesso.";
+                } catch (e) {
+                    return "Erro ao gerar PDF: " + e.message;
+                }
+            },
             weather: async (city) => {
                 if(isOfflineMode) return "Sem internet.";
                 try {
@@ -262,61 +226,33 @@
             }
         };
 
-        // --- FILE READER ---
-        window.handleFiles = async () => {
-            const input = $('file-upload');
-            const files = input.files;
-            if (files.length === 0) return;
-
-            let fileContext = "";
-            let fileCount = 0;
-
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-                fileCount++;
-                
-                if (file.type.includes('text') || file.name.endsWith('.js') || file.name.endsWith('.html') || file.name.endsWith('.py') || file.name.endsWith('.json')) {
-                    const text = await file.text();
-                    const snippet = text.slice(0, 5000); 
-                    fileContext += `\n[ARQUIVO LIDO: ${file.name}]\nCONTEÚDO:\n${snippet}\n[FIM ARQUIVO]\n`;
-                } else {
-                    fileContext += `\n[ARQUIVO ANEXADO: ${file.name} (${(file.size/1024).toFixed(1)}KB)]\n`;
-                }
-            }
-
-            if (fileContext) {
-                showToast(`${fileCount} arquivo(s) preparado(s).`);
-                window.pendingFileContext = fileContext; 
-                $('attach-btn').classList.add('text-green-500');
-            }
-        };
-
         // --- CORE ---
         function updateSystemPrompt() {
-            let persona = "Seja útil e direta.";
-            if (userConfig.vibe === 'Jarvis') persona = "Aja como o JARVIS. Técnico, formal e chame o usuário de Senhor.";
-            if (userConfig.vibe === 'Amigo') persona = "Seja casual, melhor amigo, use gírias leves.";
+            let persona = "Seja um desenvolvedor experiente e útil.";
+            if (userConfig.vibe === 'Jarvis') persona = "Aja como JARVIS. Técnico, preciso.";
+            if (userConfig.vibe === 'Amigo') persona = "Seja casual, brother.";
             
             chatHistory[0] = { 
                 role: "system", 
                 content: `
-Você é o NeuralOS. USUÁRIO: ${userConfig.name}. PERSONALIDADE: ${persona}.
+Você é o NeuralOS v7. USUÁRIO: ${userConfig.name}. PERSONALIDADE: ${persona}.
 DIRETRIZES:
-1. Pense antes de responder dentro de tags <pensamento>.
-2. Se gerar código HTML ou Javascript, envolva em blocos \`\`\`html ou \`\`\`javascript para ativar o CANVAS.
-3. Se o usuário pedir imagem, use [IMG: descrição visual].
-4. Ferramentas: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOOGLE: termo].
+1. Use tags <pensamento> para planejar.
+2. Se o usuário pedir código HTML/JS, use blocos \`\`\`html ou \`\`\`javascript para ativar o Canvas.
+3. Se pedir PDF, use a ferramenta [PDF: titulo | conteudo].
+4. Se pedir para testar/executar código, gere o código novamente dentro de um bloco de código.
+5. Ferramentas: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOOGLE: termo], [PDF: titulo | conteudo].
 ` 
             };
         }
 
         async function initSystem() {
-            applyTheme();
-            setupAudio();
-            updateSystemPrompt(); 
+            applyTheme(); // Aplica tema na largada
+            
             const wakeUpPromise = DB.wakeUp();
+            updateSystemPrompt(); 
 
-            $('status-text').innerText = "GPU Init...";
+            $('status-text').innerText = "Carregando...";
             $('loading-bar').style.width = "10%";
 
             try {
@@ -390,23 +326,37 @@ DIRETRIZES:
                     final = raw.replace(/<pensamento>.*?<\/pensamento>/s, "").trim();
                 }
 
-                if (final.includes("[IMG:")) {
+                // Parser de Ferramentas
+                if (final.includes("[PDF:")) {
+                    updateLoading(loadingId, "Gerando PDF...");
+                    const match = final.match(/\[PDF: (.*?)\s*\|\s*([\s\S]*?)\]/);
+                    if (match) {
+                        const title = match[1];
+                        const content = match[2];
+                        toolResult = await Tools.generatePDF(title, content);
+                        final = final.replace(/\[PDF:.*?\]/s, `📄 PDF "<b>${title}</b>" gerado.`);
+                    } else {
+                        toolResult = "Erro formato PDF.";
+                    }
+                }
+                else if (final.includes("[IMG:")) {
                     const prompt = final.match(/\[IMG: (.*?)\]/)[1];
                     const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`;
-                    final = final.replace(/\[IMG:.*?\]/, `🎨 Gerando Imagem...<br><img src="${imgUrl}" class="mt-2 rounded-lg w-full h-auto shadow-md" alt="${prompt}">`);
+                    final = final.replace(/\[IMG:.*?\]/, `🎨 Imagem:<br><img src="${imgUrl}" class="mt-2 rounded-lg w-full h-auto shadow-md" alt="${prompt}">`);
                 }
                 else if (final.includes("[CLIMA:")) {
                     const city = final.match(/\[CLIMA: (.*?)\]/)[1];
                     toolResult = await Tools.weather(city) || "Erro clima.";
                 }
                 else if (final.includes("[WIKI:")) {
+                    updateLoading(loadingId, "Lendo Wiki...");
                     const t = final.match(/\[WIKI: (.*?)\]/)[1];
                     toolResult = await Tools.wiki(t) || "Sem dados.";
                 }
                 else if (final.includes("[MEM:")) {
                     const c = final.match(/\[MEM: (.*?)\]/)[1];
                     await DB.add(c);
-                    toolResult = "Salvo.";
+                    toolResult = "Memória salva.";
                 }
                 else if (final.includes("[YOUTUBE:")) {
                     const t = final.match(/\[YOUTUBE: (.*?)\]/)[1];
@@ -421,7 +371,7 @@ DIRETRIZES:
 
                 if (toolResult) {
                     tempHistory.push({ role: "assistant", content: raw });
-                    tempHistory.push({ role: "user", content: `Sistema: ${toolResult}. Responda.` });
+                    tempHistory.push({ role: "user", content: `Resultado Sistema: ${toolResult}. Continue.` });
                     const step2 = await engine.chat.completions.create({ messages: tempHistory });
                     final = step2.choices[0].message.content.replace(/<pensamento>.*?<\/pensamento>/s, "").trim();
                 }
@@ -437,6 +387,81 @@ DIRETRIZES:
             } catch (e) {
                 removeLoading(loadingId);
                 appendBubble('system', "Erro: " + e.message);
+            }
+        };
+
+        // --- BANCO DE DADOS HÍBRIDO ---
+        const DB = {
+            wakeUp: async () => {
+                if (!RENDER_API_URL || isOfflineMode) return false;
+                $('status-indicator').innerHTML = '<span class="animate-pulse">⏳</span>';
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 60000); 
+                    const res = await fetch(`${RENDER_API_URL}/wake-up`, { signal: controller.signal });
+                    clearTimeout(timeoutId);
+                    if (res.ok) { 
+                        isOnlineDB = true; 
+                        $('status-indicator').innerText = "● Online";
+                        $('status-indicator').className = "text-[10px] text-green-500 font-bold cursor-pointer";
+                        return true; 
+                    }
+                } catch (e) {}
+                isOnlineDB = false;
+                $('status-indicator').innerText = "● Local";
+                $('status-indicator').className = "text-[10px] text-red-500 font-bold cursor-pointer";
+                return false;
+            },
+            retryConnection: async () => {
+                showToast("Reconectando...");
+                await DB.wakeUp();
+                DB.refreshList();
+            },
+            add: async (text) => {
+                const entry = { content: text, date: new Date().toISOString() };
+                if (isOnlineDB && !isOfflineMode) {
+                    try { fetch(`${RENDER_API_URL}/memories`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(entry) }); } catch(e){}
+                } 
+                const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
+                local.unshift({ ...entry, id: Date.now() });
+                localStorage.setItem('neural_local_db', JSON.stringify(local));
+                showToast("🧠 Salvo.");
+                DB.refreshList();
+            },
+            search: async (term) => {
+                const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
+                return local.filter(m => m.content.toLowerCase().includes(term.toLowerCase())).map(m => m.content).slice(0, 3);
+            },
+            refreshList: async () => {
+                const list = $('memory-list');
+                let items = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
+                if (isOnlineDB && !isOfflineMode) {
+                    try {
+                        const res = await fetch(`${RENDER_API_URL}/memories`);
+                        if(res.ok) items = await res.json();
+                    } catch(e) {}
+                }
+                $('mem-count').innerText = items.length;
+                list.innerHTML = items.length ? '' : '<div class="text-center text-gray-500 text-xs mt-10">Vazio</div>';
+                
+                const dark = userConfig.amoled;
+                items.forEach(item => {
+                    const el = document.createElement('div');
+                    const bgClass = dark ? 'bg-gray-900 border-gray-800 text-gray-300' : 'bg-white border-gray-100 text-gray-700';
+                    el.className = `${bgClass} p-3 rounded-lg border shadow-sm mb-2 text-sm`;
+                    el.innerHTML = `<div class="font-medium">${item.content}</div><div class="text-[10px] opacity-60 mt-1">${new Date(item.date).toLocaleDateString()}</div>`;
+                    list.appendChild(el);
+                });
+            },
+            // Função de Backup
+            exportBackup: () => {
+                const data = localStorage.getItem('neural_local_db') || '[]';
+                const blob = new Blob([data], {type: "application/json"});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `neural_backup_${new Date().toLocaleDateString().replace(/\//g,'-')}.json`;
+                a.click();
             }
         };
 
@@ -458,6 +483,7 @@ DIRETRIZES:
                 
                 let contentHTML = marked.parse(text);
                 
+                // Detecção de Código para Canvas
                 if (!isUser && (text.includes("```html") || text.includes("```javascript") || text.includes("```js"))) {
                     const codeMatch = text.match(/```(html|javascript|js)([\s\S]*?)```/);
                     if (codeMatch) {
@@ -466,8 +492,8 @@ DIRETRIZES:
                         const escapedCode = codeContent.replace(/`/g, '\\`').replace(/"/g, '&quot;');
                         
                         contentHTML += `
-                            <button onclick="openCanvas(\`${escapedCode}\`, '${codeType}')" class="mt-2 flex items-center gap-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:shadow-lg transition-all w-full justify-center">
-                                <i data-lucide="play-circle" class="w-4 h-4"></i> Ver no Canvas
+                            <button onclick="openCanvas(\`${escapedCode}\`, '${codeType}')" class="mt-2 flex items-center gap-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:shadow-lg transition-all w-full justify-center">
+                                <i data-lucide="play-circle" class="w-4 h-4"></i> Testar no Canvas
                             </button>
                         `;
                     }
@@ -483,7 +509,6 @@ DIRETRIZES:
             }
             box.appendChild(div);
             lucide.createIcons();
-            // Scroll mais seguro
             requestAnimationFrame(() => box.scrollTop = box.scrollHeight);
         }
 
@@ -503,79 +528,83 @@ DIRETRIZES:
         function removeLoading(id) { const el = document.getElementById(id); if(el) el.remove(); }
         function showToast(msg) { /* Placeholder toast */ }
 
+        // UTILS
+        window.toggleSettings = () => { $('settings-modal').classList.toggle('hidden'); loadVoices(); };
+        window.saveSettings = () => { /* Logica de save igual anterior */ 
+            userConfig.name = $('input-name').value;
+            userConfig.vibe = $('select-vibe').value;
+            userConfig.ttsEnabled = $('check-tts').checked;
+            userConfig.voiceIndex = $('select-voice').selectedIndex;
+            userConfig.amoled = $('check-amoled').checked;
+            localStorage.setItem('neural_user_name', userConfig.name);
+            localStorage.setItem('neural_ai_vibe', userConfig.vibe);
+            localStorage.setItem('neural_tts', userConfig.ttsEnabled);
+            localStorage.setItem('neural_voice_idx', userConfig.voiceIndex);
+            localStorage.setItem('neural_amoled', userConfig.amoled);
+            applyTheme(); updateSystemPrompt(); $('settings-modal').classList.add('hidden');
+        };
+        
         window.switchTab = (tab) => {
-            const dark = userConfig.amoled;
             if (tab === 'chat') {
-                $('view-chat').classList.remove('hidden');
-                $('view-mem').classList.add('hidden');
-                $('btn-chat').classList.add('bg-indigo-100', 'text-indigo-700');
-                $('btn-mem').classList.remove('bg-indigo-100', 'text-indigo-700');
+                $('view-chat').classList.remove('hidden'); $('view-mem').classList.add('hidden');
+                $('btn-chat').classList.add('bg-indigo-100', 'text-indigo-700'); $('btn-mem').classList.remove('bg-indigo-100', 'text-indigo-700');
             } else {
-                $('view-chat').classList.add('hidden');
-                $('view-mem').classList.remove('hidden');
-                $('btn-mem').classList.add('bg-indigo-100', 'text-indigo-700');
-                $('btn-chat').classList.remove('bg-indigo-100', 'text-indigo-700');
+                $('view-chat').classList.add('hidden'); $('view-mem').classList.remove('hidden');
+                $('btn-mem').classList.add('bg-indigo-100', 'text-indigo-700'); $('btn-chat').classList.remove('bg-indigo-100', 'text-indigo-700');
                 DB.refreshList();
             }
         };
-
         window.triggerFileUpload = () => $('file-upload').click();
         $('input-box').addEventListener('keypress', (e) => { if (e.key === 'Enter') window.sendMessage(); });
-        
         window.onload = initSystem;
     </script>
     <style>
         .animate-fade-in { animation: fadeIn 0.3s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        /* Scrollbar Oculta para Mobile Clean */
         ::-webkit-scrollbar { width: 0px; } 
     </style>
 </head>
 <body class="font-sans antialiased bg-slate-50 text-slate-800 transition-colors duration-300 h-full w-full overflow-hidden flex flex-col">
 
-    <!-- CANVAS MODAL -->
+    <!-- CANVAS MODAL (Com Logs) -->
     <div id="canvas-modal" class="hidden fixed inset-0 z-50 bg-black flex flex-col animate-fade-in">
-        <div class="h-12 bg-gray-900 flex items-center justify-between px-4 border-b border-gray-800">
+        <div class="h-12 bg-gray-900 flex items-center justify-between px-4 border-b border-gray-800 shrink-0">
             <h3 id="canvas-title" class="text-white text-sm font-bold flex items-center gap-2">
-                <i data-lucide="layout" class="w-4 h-4 text-green-400"></i> Canvas
+                <i data-lucide="layout" class="w-4 h-4 text-green-400"></i> Canvas Pro
             </h3>
-            <button onclick="closeCanvas()" class="text-gray-400 hover:text-white p-2">
-                <i data-lucide="x" class="w-5 h-5"></i>
-            </button>
+            <div class="flex gap-2">
+                <button id="fix-code-btn" onclick="fixCanvasCode()" class="hidden bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs font-bold flex items-center gap-1">
+                    <i data-lucide="wrench" class="w-3 h-3"></i> Corrigir Erro
+                </button>
+                <button onclick="closeCanvas()" class="text-gray-400 hover:text-white p-2">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
         </div>
-        <div id="canvas-container" class="flex-1 w-full h-full bg-white relative"></div>
+        <!-- Área de Preview -->
+        <div id="canvas-container" class="flex-1 w-full bg-white relative"></div>
+        <!-- Área de Logs -->
+        <div class="h-32 bg-gray-950 border-t border-gray-800 p-2 overflow-y-auto font-mono text-[10px] shrink-0" id="canvas-console">
+            <div class="text-gray-600 italic">Console pronto...</div>
+        </div>
     </div>
 
-    <!-- CONFIG MODAL -->
-    <div id="settings-modal" class="hidden absolute inset-0 z-40 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
-        <div class="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl">
+    <!-- SETTINGS MODAL -->
+    <div id="settings-modal" class="hidden absolute inset-0 z-40 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm modal-bg">
+        <div class="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl modal-bg">
             <h2 class="text-lg font-bold mb-4">Ajustes</h2>
-            
-            <label class="block text-xs font-bold text-gray-500 mb-1">Seu Nome</label>
-            <input id="input-name" type="text" class="w-full bg-gray-100 rounded p-2 text-sm mb-3">
-            
-            <label class="block text-xs font-bold text-gray-500 mb-1">Personalidade</label>
-            <select id="select-vibe" class="w-full bg-gray-100 rounded p-2 text-sm mb-3">
+            <label class="block text-xs font-bold text-gray-500 mb-1">Nome</label>
+            <input id="input-name" type="text" class="w-full bg-gray-100 rounded p-2 text-sm mb-3 text-black">
+            <label class="block text-xs font-bold text-gray-500 mb-1">Persona</label>
+            <select id="select-vibe" class="w-full bg-gray-100 rounded p-2 text-sm mb-3 text-black">
                 <option value="Assistente Padrão">Padrão</option>
                 <option value="Jarvis">Jarvis</option>
                 <option value="Amigo">Amigo</option>
             </select>
-
-            <label class="block text-xs font-bold text-gray-500 mb-1">Voz (TTS)</label>
-            <select id="select-voice" class="w-full bg-gray-100 rounded p-2 text-sm mb-3 text-xs">
-                <option>Carregando...</option>
-            </select>
-            
-            <div class="flex items-center justify-between mb-4">
-                <span class="text-sm">Fala Ativa</span>
-                <input id="check-tts" type="checkbox" class="w-5 h-5 accent-indigo-600">
-            </div>
-
-            <div class="flex items-center justify-between mb-6">
-                <span class="text-sm">Modo AMOLED</span>
-                <input id="check-amoled" type="checkbox" class="w-5 h-5 accent-black">
-            </div>
-            
+            <label class="block text-xs font-bold text-gray-500 mb-1">Voz</label>
+            <select id="select-voice" class="w-full bg-gray-100 rounded p-2 text-sm mb-3 text-xs text-black"><option>Carregando...</option></select>
+            <div class="flex items-center justify-between mb-4"><span class="text-sm">Fala Ativa</span><input id="check-tts" type="checkbox" class="w-5 h-5 accent-indigo-600"></div>
+            <div class="flex items-center justify-between mb-6"><span class="text-sm">Modo AMOLED</span><input id="check-amoled" type="checkbox" class="w-5 h-5 accent-black"></div>
             <button onclick="saveSettings()" class="w-full bg-indigo-600 text-white py-2 rounded-xl font-bold">Salvar</button>
             <button onclick="toggleSettings()" class="w-full mt-2 text-gray-400 text-xs">Fechar</button>
         </div>
@@ -586,75 +615,59 @@ DIRETRIZES:
         <div class="w-20 h-20 mb-6 rounded-3xl bg-indigo-600 flex items-center justify-center shadow-xl animate-bounce">
             <i data-lucide="cpu" class="text-white w-10 h-10"></i>
         </div>
-        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v6</span></h2>
+        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v7</span></h2>
         <p id="status-text" class="text-gray-400 text-xs font-mono mb-8">Iniciando...</p>
         <div class="w-48 h-1.5 bg-gray-100 rounded-full overflow-hidden">
             <div id="loading-bar" class="h-full bg-indigo-600 transition-all duration-300 w-0"></div>
         </div>
     </div>
 
-    <!-- APP CONTAINER -->
+    <!-- MAIN APP -->
     <div id="main-app-container" class="flex-1 flex flex-col relative overflow-hidden max-w-md mx-auto w-full h-full border-x border-gray-100 shadow-2xl bg-white">
-        
         <header class="h-14 backdrop-blur border-b border-gray-100 flex items-center justify-between px-4 shrink-0 z-20 transition-colors" id="main-header">
             <div class="flex items-center gap-3">
-                <button onclick="toggleSettings()" class="p-2 rounded-full hover:bg-gray-200/50">
-                    <i data-lucide="settings" class="w-5 h-5 text-gray-600"></i>
-                </button>
+                <button onclick="toggleSettings()" class="p-2 rounded-full hover:bg-gray-200/50"><i data-lucide="settings" class="w-5 h-5 text-gray-500"></i></button>
                 <div>
                     <h1 class="font-bold text-sm">NeuralOS</h1>
                     <div id="status-indicator" onclick="DB.retryConnection()" class="text-[10px] text-gray-400 font-medium cursor-pointer">● Conectando...</div>
                 </div>
             </div>
-            
             <div class="flex bg-gray-100/50 p-1 rounded-full">
                 <button id="btn-chat" onclick="switchTab('chat')" class="px-4 py-1.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700 transition-all">Chat</button>
                 <button id="btn-mem" onclick="switchTab('mem')" class="px-4 py-1.5 rounded-full text-xs font-bold text-gray-500 hover:text-indigo-600 transition-all">Banco</button>
             </div>
         </header>
 
-        <!-- VIEW CHAT (Flexbox Completo para evitar bugs visuais) -->
+        <!-- CHAT -->
         <div id="view-chat" class="flex-1 flex flex-col relative overflow-hidden h-full">
-            <!-- Área de Conversa -->
             <div id="chat-box" class="flex-1 overflow-y-auto scroll-smooth p-4">
                 <div id="chat-content" class="pt-2 space-y-4">
                     <div class="flex justify-center">
-                        <span class="text-[10px] opacity-50 px-3 py-1 rounded-full border flex items-center gap-1">
-                            <i data-lucide="sparkles" class="w-3 h-3"></i> Pronto para criar
-                        </span>
+                        <span class="text-[10px] opacity-50 px-3 py-1 rounded-full border flex items-center gap-1"><i data-lucide="code" class="w-3 h-3"></i> Dev Mode Ativo</span>
                     </div>
                 </div>
             </div>
-
-            <!-- INPUT BAR (Fixo no fluxo Flex, não absolute) -->
-            <div class="w-full p-4 bg-white z-10 transition-colors shrink-0 border-t border-gray-100" id="input-container">
-                <div class="flex items-center gap-2 border p-1.5 pl-2 rounded-full shadow-sm bg-white" id="input-wrapper">
-                    <!-- Anexo -->
-                    <button id="attach-btn" onclick="triggerFileUpload()" class="w-9 h-9 rounded-full text-gray-400 hover:text-indigo-600 flex items-center justify-center transition-colors">
-                        <i data-lucide="paperclip" class="w-5 h-5"></i>
-                    </button>
+            
+            <!-- INPUT (Flexbox Fixo) -->
+            <div id="input-container" class="w-full p-4 bg-white z-10 transition-colors shrink-0 border-t border-gray-100">
+                <div id="input-wrapper" class="flex items-center gap-2 border p-1.5 pl-2 rounded-full shadow-sm bg-white">
+                    <button id="attach-btn" onclick="triggerFileUpload()" class="w-9 h-9 rounded-full text-gray-400 hover:text-indigo-600 flex items-center justify-center transition-colors"><i data-lucide="paperclip" class="w-5 h-5"></i></button>
                     <input type="file" id="file-upload" multiple class="hidden" onchange="handleFiles()">
-                    
-                    <input id="input-box" type="text" class="flex-1 bg-transparent text-sm focus:outline-none placeholder-gray-400" placeholder="Digite, fale ou anexe...">
-                    
-                    <!-- Mic -->
-                    <button id="mic-btn" onclick="window.toggleMic && window.toggleMic()" class="w-9 h-9 rounded-full bg-gray-100 text-gray-500 hover:bg-red-100 hover:text-red-500 flex items-center justify-center transition-colors">
-                        <i data-lucide="mic" class="w-5 h-5"></i>
-                    </button>
-
-                    <!-- Send -->
-                    <button onclick="window.sendMessage()" class="w-10 h-10 bg-indigo-600 hover:bg-indigo-500 rounded-full flex items-center justify-center text-white shadow-lg transition-transform active:scale-95">
-                        <i data-lucide="arrow-up" class="w-5 h-5"></i>
-                    </button>
+                    <input id="input-box" type="text" class="flex-1 bg-transparent text-sm focus:outline-none placeholder-gray-400 text-gray-800" placeholder="Digite...">
+                    <button id="mic-btn" onclick="window.toggleMic && window.toggleMic()" class="w-9 h-9 rounded-full bg-gray-100 text-gray-500 hover:bg-red-100 hover:text-red-500 flex items-center justify-center transition-colors"><i data-lucide="mic" class="w-5 h-5"></i></button>
+                    <button onclick="window.sendMessage()" class="w-10 h-10 bg-indigo-600 hover:bg-indigo-500 rounded-full flex items-center justify-center text-white shadow-lg transition-transform active:scale-95"><i data-lucide="arrow-up" class="w-5 h-5"></i></button>
                 </div>
             </div>
         </div>
 
-        <!-- VIEW MEMORY -->
+        <!-- MEMORY -->
         <div id="view-mem" class="hidden flex-1 flex flex-col overflow-hidden h-full">
             <div class="p-4 border-b flex justify-between items-center shrink-0">
                 <h3 class="font-bold text-xs uppercase tracking-wider opacity-70">Memória (<span id="mem-count">0</span>)</h3>
-                <button onclick="DB.refreshList()" class="p-2 rounded-full hover:bg-gray-100"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
+                <div class="flex gap-2">
+                    <button onclick="DB.exportBackup()" class="p-2 rounded-full bg-green-50 text-green-600 hover:bg-green-100" title="Baixar Backup"><i data-lucide="download" class="w-4 h-4"></i></button>
+                    <button onclick="DB.refreshList()" class="p-2 rounded-full hover:bg-gray-100"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
+                </div>
             </div>
             <div id="memory-list" class="flex-1 overflow-y-auto p-4"></div>
         </div>
