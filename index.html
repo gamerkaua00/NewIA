@@ -2,18 +2,18 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IA Local - Projeto Neural (Speed Edition)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>IA Mobile Pro - Poco Edition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
     
     <script type="module">
         import * as webllm from "https://esm.run/@mlc-ai/web-llm";
 
-        // CONFIGURAÇÃO DE VELOCIDADE (SPEED EDITION)
-        // Voltamos para o 1B. O 3B estava pesado demais para o hardware atual.
-        // O 1B é otimizado para latência baixa em dispositivos móveis/web.
-        const selectedModel = "Llama-3.2-1B-Instruct-q4f16_1-MLC";
+        // --- CONFIGURAÇÃO ULTRA (Poco X7 Pro Edition) ---
+        // Com 12GB de RAM, podemos usar o modelo 3B confortavelmente.
+        // Ele é muito mais inteligente e criativo que o 1B.
+        const selectedModel = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
 
         let engine = null;
         let chatHistory = [];
@@ -21,61 +21,52 @@
         const $ = (id) => document.getElementById(id);
 
         async function initChat() {
-            $('status-text').innerText = "Verificando hardware...";
+            $('status-text').innerText = "Detectando GPU Mobile...";
             $('error-log').classList.add('hidden');
-            $('loading-bar').style.width = "5%";
+            $('loading-bar').style.width = "10%";
             
             const initProgressCallback = (report) => {
                 $('status-text').innerText = report.text;
-                // Barra de progresso visual
                 if(report.text.includes("Fetching param cache")) {
                     const match = report.text.match(/(\d+)%/);
                     if (match) $('loading-bar').style.width = match[1] + "%";
                 } else if (report.text.includes("Loading model")) {
                      $('loading-bar').style.width = "85%";
                 } else if (report.text.includes("Finish")) {
-                     $('loading-bar').style.width = "90%";
+                     $('loading-bar').style.width = "100%";
                 }
             };
 
             try {
                 if (!navigator.gpu) {
-                    throw new Error("Seu navegador não suporta WebGPU. Use Chrome ou Edge atualizados.");
+                    throw new Error("Navegador sem suporte WebGPU. No Android, use o Chrome Beta ou Canary se o estável falhar, e ative flags se necessário.");
                 }
 
-                console.log("Inicializando motor Turbo:", selectedModel);
+                console.log("Iniciando Motor 3B:", selectedModel);
 
                 engine = await webllm.CreateMLCEngine(
                     selectedModel,
                     { 
                         initProgressCallback: initProgressCallback,
-                        logLevel: "SILENT" // Menos logs para focar em performance
+                        logLevel: "INFO"
                     }
                 );
                 
-                // --- TRUQUE DE VELOCIDADE: WARM-UP ---
-                // Forçamos uma geração invisível para "compilar" os shaders agora.
-                // Isso elimina o travamento de 12s na primeira mensagem do usuário.
-                $('status-text').innerText = "Aquecendo motores neurais (Isso evita lentidão)...";
-                $('loading-bar').style.width = "95%";
-                
+                // Warm-up rápido
+                $('status-text').innerText = "Otimizando para 12GB RAM...";
                 await engine.chat.completions.create({
-                    messages: [{ role: "user", content: "hi" }],
+                    messages: [{ role: "user", content: "oi" }],
                     max_tokens: 1,
                 });
-                // -------------------------------------
 
-                $('status-text').innerText = "Sistema Pronto!";
-                $('loading-bar').style.width = "100%";
-                
+                $('status-text').innerText = "Pronto!";
                 setTimeout(() => $('loading-container').style.display = 'none', 500);
                 $('send-btn').disabled = false;
                 
                 const systemPrompt = `
-Você é uma assistente rápida e eficiente.
-- Responda de forma imediata e curta.
-- Use Português do Brasil.
-- Se o usuário disser "Oi", responda apenas: "Olá! Como posso ajudar hoje?"
+Você é uma assistente pessoal avançada rodando em um dispositivo de alto desempenho.
+- Suas respostas devem ser úteis, detalhadas quando necessário, e sempre em Português.
+- Você tem mais capacidade de raciocínio agora.
 
 COMANDOS:
 - [BUSCAR: termo]
@@ -88,10 +79,10 @@ COMANDOS:
                 $('status-text').innerText = "Erro na inicialização.";
                 
                 $('error-log').innerHTML = `
-                    <div class="font-bold text-red-300">Erro Técnico:</div>
-                    <div class="mb-2">${err.message}</div>
-                    <button onclick="window.clearCache()" class="mt-3 w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded text-xs uppercase font-bold transition-colors">
-                        Limpar Cache (Resolver Travamento)
+                    <div class="font-bold text-red-300">Erro:</div>
+                    <div class="mb-2 text-[10px]">${err.message}</div>
+                    <button onclick="window.clearCache()" class="mt-4 w-full bg-red-600 active:bg-red-800 text-white py-3 rounded-lg text-sm font-bold shadow-lg">
+                        LIMPAR CACHE E REINICIAR
                     </button>
                 `;
                 $('error-log').classList.remove('hidden');
@@ -99,9 +90,8 @@ COMANDOS:
         }
 
         window.clearCache = async () => {
-             if(confirm("Isso apagará o modelo atual para baixar novamente. Continuar?")) {
+             if(confirm("Apagar modelo e baixar novamente?")) {
                 try {
-                    $('status-text').innerText = "Limpando...";
                     const cacheKeys = await caches.keys();
                     for (const key of cacheKeys) {
                         if (key.includes("webllm")) await caches.delete(key);
@@ -125,10 +115,11 @@ COMANDOS:
             if (!div) {
                 div = document.createElement('div');
                 if (id) div.id = id;
-                div.className = `p-3 rounded-lg max-w-[85%] mb-2 text-sm leading-relaxed shadow-sm animate-fade-in ${
+                // Layout Mobile: Balões mais largos, fontes legíveis
+                div.className = `p-4 rounded-2xl max-w-[90%] mb-3 text-base leading-relaxed shadow-sm animate-fade-in ${
                     role === 'user' 
                     ? 'bg-blue-600 text-white self-end ml-auto rounded-tr-none' 
-                    : 'bg-gray-700 text-gray-200 self-start rounded-tl-none prose prose-invert max-w-none'
+                    : 'bg-gray-800 border border-gray-700 text-gray-100 self-start rounded-tl-none prose prose-invert prose-p:my-1 prose-headings:text-blue-300 max-w-none'
                 }`;
                 chatBox.appendChild(div);
             }
@@ -148,19 +139,21 @@ COMANDOS:
             const text = input.value.trim();
             if (!text || !engine) return;
 
+            // Fecha teclado no mobile para ver a resposta (opcional)
+            // input.blur(); 
+
             appendMessage('user', text);
             input.value = '';
             chatHistory.push({ role: "user", content: text });
 
             const responseId = 'msg-' + Date.now();
-            // Feedback visual imediato
-            appendMessage('assistant', '<span class="animate-pulse text-blue-300">...</span>', responseId);
+            appendMessage('assistant', '<span class="animate-pulse text-blue-300">Pensando...</span>', responseId);
 
             try {
                 const chunks = await engine.chat.completions.create({
                     messages: chatHistory,
-                    temperature: 0.5, // Temperatura menor = respostas mais rápidas e diretas
-                    max_tokens: 1024,
+                    temperature: 0.7, // Mais criatividade para o modelo 3B
+                    max_tokens: 2048,
                     stream: true
                 });
 
@@ -193,11 +186,9 @@ COMANDOS:
         async function handleSearchTool(command) {
             const query = command.match(/\[BUSCAR: (.*?)\]/)[1];
             appendMessage('assistant', `🔎 <i>Pesquisando: "${query}"...</i>`);
-            
             setTimeout(async () => {
-                const fakeResult = `Resultado simulado: Conexão Google Search API pendente.`;
+                const fakeResult = `Resultado simulado: API Google pendente.`;
                 chatHistory.push({ role: "system", content: `[SISTEMA]: Resultado: "${fakeResult}".` });
-                
                 const followUp = await engine.chat.completions.create({ messages: chatHistory });
                 const finalText = followUp.choices[0].message.content;
                 appendMessage('assistant', finalText);
@@ -207,12 +198,10 @@ COMANDOS:
 
         async function handleSaveTool(command) {
             const data = command.match(/\[SALVAR: (.*?)\]/)[1];
-            
             const savedItems = JSON.parse(localStorage.getItem('ia_memoria') || '[]');
             savedItems.push({ data: new Date().toISOString(), content: data });
             localStorage.setItem('ia_memoria', JSON.stringify(savedItems));
-
-            appendMessage('assistant', `💾 <i>Salvo: "${data}"</i>`);
+            appendMessage('assistant', `💾 <i>Salvo.</i>`);
             chatHistory.push({ role: "assistant", content: `Salvo.` });
         }
 
@@ -223,84 +212,87 @@ COMANDOS:
         window.onload = initChat;
     </script>
     <style>
-        @keyframes fade-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-        .animate-fade-in { animation: fade-in 0.2s ease-out; }
-        .prose p { margin-bottom: 0.5em; }
-        .prose ul { list-style-type: disc; padding-left: 1.5em; }
-        .prose strong { color: #fff; font-weight: bold; }
+        @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        
+        /* Ajustes Mobile Específicos */
+        html, body {
+            height: 100%;
+            height: 100dvh; /* Dynamic Viewport Height para mobile moderno */
+            overflow: hidden; /* Evita scroll na página inteira */
+        }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 h-screen flex flex-col font-sans overflow-hidden">
+<body class="bg-gray-900 text-gray-100 flex flex-col font-sans">
 
-    <!-- Header -->
-    <header class="bg-gray-800 p-4 border-b border-gray-700 flex justify-between items-center shadow-lg z-10">
+    <!-- Header Compacto Mobile -->
+    <header class="bg-gray-900/90 backdrop-blur-md p-3 border-b border-gray-800 flex justify-between items-center z-10 absolute top-0 w-full h-14">
         <div class="flex items-center gap-3">
             <div class="relative">
-                <div class="w-3 h-3 rounded-full bg-yellow-500 animate-pulse"></div>
-                <div class="absolute inset-0 w-3 h-3 rounded-full bg-yellow-500 blur-sm animate-pulse"></div>
+                <div class="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></div>
+                <div class="absolute inset-0 w-2.5 h-2.5 rounded-full bg-blue-500 blur-sm animate-pulse"></div>
             </div>
             <div>
-                <h1 class="font-bold text-lg tracking-wide leading-none">Projeto Neural</h1>
-                <span class="text-[10px] text-gray-400 font-mono">CORE: LLAMA 3.2 1B (Turbo)</span>
+                <h1 class="font-bold text-base tracking-wide">Neural <span class="text-blue-400">Pro</span></h1>
             </div>
         </div>
         
-        <div class="flex gap-2 text-xs">
-            <div class="px-2 py-1 bg-gray-700 rounded border border-gray-600 flex items-center gap-2">
-                GPU
-                <span class="w-2 h-2 rounded-full bg-green-500"></span>
+        <div class="flex gap-2 text-[10px]">
+            <div class="px-2 py-1 bg-gray-800 rounded-full border border-gray-700 flex items-center gap-1 font-mono text-gray-400">
+                12GB RAM
+                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
             </div>
         </div>
     </header>
 
-    <!-- Overlay de Carregamento -->
+    <!-- Overlay de Carregamento Otimizado -->
     <div id="loading-container" class="absolute inset-0 bg-gray-900 z-50 flex flex-col items-center justify-center p-6 text-center backdrop-blur-sm">
-        <div class="w-full max-w-md bg-gray-800 rounded-xl p-8 shadow-2xl border border-gray-700 relative overflow-hidden">
-            <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-yellow-500 via-orange-500 to-yellow-500"></div>
+        <div class="w-full max-w-sm bg-gray-800 rounded-2xl p-6 shadow-2xl border border-gray-700 relative overflow-hidden">
+            <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-purple-600 to-blue-600"></div>
 
-            <h2 class="text-xl font-bold mb-4 text-white">Otimizando Cérebro</h2>
+            <h2 class="text-xl font-bold mb-2 text-white">Carregando Modelo 3B</h2>
+            <p class="text-xs text-gray-400 mb-6">Otimizando para Poco X7 Pro...</p>
             
-            <div class="w-full bg-gray-900 h-4 rounded-full overflow-hidden mb-2 border border-gray-600">
-                <div id="loading-bar" class="h-full bg-yellow-500 transition-all duration-300 relative" style="width: 0%">
-                    <div class="absolute inset-0 bg-white/20 animate-[pulse_1s_infinite]"></div>
-                </div>
+            <div class="w-full bg-gray-900 h-3 rounded-full overflow-hidden mb-2 border border-gray-600">
+                <div id="loading-bar" class="h-full bg-blue-500 transition-all duration-300 relative" style="width: 0%"></div>
             </div>
             
-            <p id="status-text" class="text-yellow-300 text-sm font-mono mt-2 min-h-[20px]">Inicializando...</p>
+            <p id="status-text" class="text-blue-300 text-xs font-mono mt-2 min-h-[20px]">Iniciando...</p>
             
-            <div id="error-log" class="hidden mt-4 p-4 bg-red-900/30 border border-red-500/50 rounded text-red-200 text-left overflow-auto max-h-64"></div>
+            <div id="error-log" class="hidden mt-4 p-3 bg-red-900/30 border border-red-500/30 rounded text-red-200 text-left overflow-auto max-h-40 text-xs"></div>
 
-            <p class="text-xs text-gray-500 mt-6 border-t border-gray-700 pt-4">
-                ⚠️ Baixando versão Leve (1B). <br>
-                Realizando aquecimento de GPU para evitar atrasos na conversa.
+            <p class="text-[10px] text-gray-500 mt-6 pt-4 border-t border-gray-700">
+                Baixando ~2.3GB. <br>Recomendado Wi-Fi.
             </p>
         </div>
     </div>
 
-    <!-- Área do Chat -->
-    <main class="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth bg-gradient-to-b from-gray-900 to-gray-800" id="chat-box">
-        <div class="p-4 rounded-xl bg-gray-800/80 backdrop-blur border border-gray-700 text-gray-200 self-start max-w-[85%] shadow-lg">
-            <p class="mb-2">🚀 <b>Modo Turbo Ativado.</b></p>
-            <p class="text-sm opacity-80">
-                Mudei para o Llama 3.2 1B e aqueci os motores. Estou pronta para responder instantaneamente.
+    <!-- Área do Chat (Com padding para header e footer) -->
+    <main class="flex-1 overflow-y-auto p-4 pt-16 pb-2 space-y-4 scroll-smooth w-full max-w-2xl mx-auto" id="chat-box">
+        <div class="p-4 rounded-2xl bg-gray-800 border border-gray-700 text-gray-200 shadow-lg">
+            <p class="mb-1 text-sm font-bold text-blue-400">⚡ Modo Ultra Ativado</p>
+            <p class="text-sm opacity-90 leading-relaxed">
+                Estou usando o modelo <b>Llama 3.2 3B</b>. Estou mais inteligente e pronta para usar a potência do seu celular.
             </p>
         </div>
     </main>
 
-    <!-- Input -->
-    <footer class="bg-gray-800 p-4 border-t border-gray-700 z-10">
-        <div class="max-w-4xl mx-auto flex gap-3 relative">
+    <!-- Input Mobile Friendly -->
+    <footer class="bg-gray-900 p-3 border-t border-gray-800 z-20 pb-safe">
+        <div class="max-w-2xl mx-auto flex gap-2 relative items-center">
             <input type="text" id="user-input" 
-                class="w-full bg-gray-900 border border-gray-600 rounded-xl px-5 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500 transition-all shadow-inner"
-                placeholder="Digite sua mensagem..." autocomplete="off">
+                class="flex-1 bg-gray-800 text-white rounded-full px-5 py-3.5 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-inner text-base"
+                placeholder="Digite aqui..." autocomplete="off">
                 
             <button onclick="window.sendMessage()" id="send-btn" disabled
-                class="bg-yellow-600 hover:bg-yellow-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white px-6 rounded-xl font-bold transition-all shadow-lg hover:shadow-yellow-500/20 active:scale-95 flex items-center justify-center min-w-[60px]">
+                class="bg-blue-600 active:bg-blue-700 active:scale-95 disabled:bg-gray-800 disabled:text-gray-600 text-white w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
                     <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/>
                 </svg>
             </button>
         </div>
+        <!-- Espaço extra para barras de navegação do Android/iOS -->
+        <div class="h-1 w-full"></div> 
     </footer>
 
 </body>
