@@ -3,184 +3,242 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <title>NeuralOS - Custom Cloud</title>
+    <title>NeuralOS v5 - Ultimate</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     
     <script type="module">
-        // Importando versão ESTÁVEL 0.2.72 para evitar erros de compatibilidade
         import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.72/+esm";
 
-        // ======================================================
-        // ⚙️ CONFIGURAÇÃO DO SEU SERVIDOR (RENDER)
-        // ======================================================
+        // --- CONFIGURAÇÃO ---
         const RENDER_API_URL = "https://neural-api-3vra.onrender.com"; 
-        // ======================================================
-
-        // Modelo nativo da versão 0.2.72 (Não requer config manual)
         const MODEL_ID = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
-        const MAX_HISTORY = 10;
+        const MAX_HISTORY = 15;
 
+        // --- ESTADO GLOBAL ---
         let engine = null;
         let chatHistory = [];
         let isOnlineDB = false;
+        let isOfflineMode = false;
+        let recognition = null;
         
+        // Configurações do Usuário (Persistentes)
+        let userConfig = {
+            name: localStorage.getItem('neural_user_name') || 'Usuário',
+            vibe: localStorage.getItem('neural_ai_vibe') || 'Assistente Padrão',
+            ttsEnabled: localStorage.getItem('neural_tts') === 'true',
+            autoSave: true
+        };
+
         const $ = (id) => document.getElementById(id);
 
-        // --- SISTEMA DE BANCO DE DADOS (API PRÓPRIA) ---
+        // --- SISTEMA DE ÁUDIO (TTS & STT) ---
+        function setupAudio() {
+            // Reconhecimento de Voz (STT)
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                recognition.lang = 'pt-BR';
+                recognition.continuous = false;
+                recognition.interimResults = false;
+
+                recognition.onstart = () => {
+                    $('mic-btn').classList.replace('bg-gray-100', 'bg-red-500');
+                    $('mic-btn').classList.add('text-white', 'animate-pulse');
+                    $('input-box').placeholder = "Ouvindo...";
+                };
+                recognition.onend = () => {
+                    $('mic-btn').classList.replace('bg-red-500', 'bg-gray-100');
+                    $('mic-btn').classList.remove('text-white', 'animate-pulse');
+                    $('input-box').placeholder = "Digite ou fale...";
+                };
+                recognition.onresult = (event) => {
+                    $('input-box').value = event.results[0][0].transcript;
+                    window.sendMessage();
+                };
+            } else { $('mic-btn').style.display = 'none'; }
+        }
+
+        // Fala da IA (TTS)
+        function speak(text) {
+            if (!userConfig.ttsEnabled || !text) return;
+            // Limpa formatação Markdown para não ler asteriscos
+            const cleanText = text.replace(/[*#_\[\]]/g, '').replace(/https?:\/\/\S+/g, 'link');
+            const utterance = new SpeechSynthesisUtterance(cleanText);
+            utterance.lang = 'pt-BR';
+            utterance.rate = 1.1; // Um pouco mais rápido
+            utterance.pitch = 1.0;
+            window.speechSynthesis.cancel(); // Para fala anterior
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // --- GERENCIADOR DE CONFIGURAÇÕES ---
+        window.toggleSettings = () => {
+            const modal = $('settings-modal');
+            modal.classList.toggle('hidden');
+            // Carrega valores atuais
+            $('input-name').value = userConfig.name;
+            $('select-vibe').value = userConfig.vibe;
+            $('check-tts').checked = userConfig.ttsEnabled;
+        };
+
+        window.saveSettings = () => {
+            userConfig.name = $('input-name').value;
+            userConfig.vibe = $('select-vibe').value;
+            userConfig.ttsEnabled = $('check-tts').checked;
+            
+            localStorage.setItem('neural_user_name', userConfig.name);
+            localStorage.setItem('neural_ai_vibe', userConfig.vibe);
+            localStorage.setItem('neural_tts', userConfig.ttsEnabled);
+            
+            updateSystemPrompt(); // Atualiza o cérebro com a nova personalidade
+            $('settings-modal').classList.add('hidden');
+            showToast("Configurações salvas!");
+        };
+
+        // --- BANCO DE DADOS HÍBRIDO ---
         const DB = {
             wakeUp: async () => {
-                if (!RENDER_API_URL) return false;
+                if (!RENDER_API_URL || isOfflineMode) return false;
                 try {
-                    $('status-text').innerText = "Acordando servidor no Render...";
-                    $('status-text').className = "text-yellow-400 text-xs font-mono mb-6 mt-2 animate-pulse";
-                    
+                    $('status-text').innerText = "Conectando nuvem...";
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 60000);
-                    
+                    setTimeout(() => controller.abort(), 10000); // 10s timeout
                     const res = await fetch(`${RENDER_API_URL}/wake-up`, { signal: controller.signal });
-                    clearTimeout(timeoutId);
-                    
-                    if (res.ok) {
-                        isOnlineDB = true;
-                        console.log("Servidor Acordado!");
-                        return true;
-                    }
-                } catch (e) {
-                    console.warn("Falha ao conectar no Render. Usando modo local.", e);
-                }
+                    if (res.ok) { isOnlineDB = true; return true; }
+                } catch (e) { console.warn("Modo Local."); }
                 return false;
             },
-
+            
             add: async (text) => {
-                if (isOnlineDB) {
+                const entry = { content: text, date: new Date().toISOString() };
+                if (isOnlineDB && !isOfflineMode) {
                     try {
-                        await fetch(`${RENDER_API_URL}/memories`, {
+                        fetch(`${RENDER_API_URL}/memories`, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ content: text })
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify(entry)
                         });
-                        showToast("Salvo na Nuvem Própria");
-                        DB.refreshList();
-                    } catch(e) { showToast("Erro ao salvar na nuvem"); }
+                    } catch(e){}
                 } else {
                     const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
-                    local.unshift({ id: Date.now(), content: text, date: new Date().toISOString() });
+                    local.unshift({ ...entry, id: Date.now() });
                     localStorage.setItem('neural_local_db', JSON.stringify(local));
-                    showToast("Salvo Localmente (Sem API)");
-                    DB.refreshList();
                 }
+                showToast("🧠 Memória Atualizada");
+                DB.refreshList();
             },
 
             search: async (term) => {
-                if (isOnlineDB) {
-                    try {
-                        const res = await fetch(`${RENDER_API_URL}/memories?search=${encodeURIComponent(term)}`);
-                        const data = await res.json();
-                        return data.map(m => m.content);
-                    } catch(e) { return []; }
-                } else {
-                    const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
-                    return local
-                        .filter(m => m.content.toLowerCase().includes(term.toLowerCase()))
-                        .map(m => m.content)
-                        .slice(0, 3);
-                }
+                // Simulação de busca local rápida para o chat
+                const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
+                return local.filter(m => m.content.toLowerCase().includes(term.toLowerCase()))
+                            .map(m => m.content).slice(0, 3);
             },
 
             refreshList: async () => {
                 const list = $('memory-list');
-                list.innerHTML = '<div class="text-center text-xs text-gray-400 mt-4">Carregando...</div>';
-                let items = [];
-
-                if (isOnlineDB) {
+                let items = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
+                
+                // Se online, tenta pegar da nuvem também (opcional misturar)
+                if (isOnlineDB && !isOfflineMode) {
                     try {
                         const res = await fetch(`${RENDER_API_URL}/memories`);
                         items = await res.json();
-                        $('db-status-indicator').innerHTML = '<span class="text-green-500 font-bold">● Online (Render)</span>';
-                    } catch(e) { items = []; }
+                        $('status-indicator').innerText = "● Online (Nuvem)";
+                        $('status-indicator').className = "text-[10px] text-green-500 font-bold";
+                    } catch(e) {}
                 } else {
-                    items = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
-                    $('db-status-indicator').innerHTML = '<span class="text-yellow-500 font-bold">● Offline (Local)</span>';
+                    $('status-indicator').innerText = "● Local (Offline)";
+                    $('status-indicator').className = "text-[10px] text-yellow-500 font-bold";
                 }
 
-                list.innerHTML = '';
                 $('mem-count').innerText = items.length;
-
-                if (items.length === 0) {
-                    list.innerHTML = `<div class="text-center text-gray-400 text-xs mt-10">Memória vazia.</div>`;
-                    return;
-                }
-
+                list.innerHTML = items.length ? '' : '<div class="text-center text-gray-400 text-xs mt-10">Vazio</div>';
+                
                 items.forEach(item => {
                     const el = document.createElement('div');
-                    el.className = "bg-white p-3 rounded-lg border border-gray-100 shadow-sm flex flex-col items-start text-sm text-gray-700 mb-2 hover:border-indigo-200 transition-colors";
-                    el.innerHTML = `
-                        <span class="font-medium text-gray-800">${item.content}</span>
-                        <div class="flex justify-between w-full mt-2 border-t border-gray-50 pt-2">
-                            <span class="text-[10px] text-gray-400">${new Date(item.date).toLocaleDateString()}</span>
-                            ${!isOnlineDB ? `<button onclick="window.delLocal(${item.id})" class="text-red-400 text-[10px] hover:text-red-600">Apagar</button>` : ''}
-                        </div>
-                    `;
+                    el.className = "bg-white p-3 rounded-lg border border-gray-100 shadow-sm mb-2 text-sm text-gray-700";
+                    el.innerHTML = `<div class="font-medium">${item.content}</div><div class="text-[10px] text-gray-400 mt-1">${new Date(item.date).toLocaleDateString()}</div>`;
                     list.appendChild(el);
                 });
             }
         };
 
-        window.delLocal = (id) => {
-            let local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
-            local = local.filter(m => m.id !== id);
-            localStorage.setItem('neural_local_db', JSON.stringify(local));
-            DB.refreshList();
-        }
-
-        const WebAgent = {
-            searchWiki: async (q) => {
+        // --- WEB & TOOLS ---
+        const Tools = {
+            weather: async (city) => {
+                if(isOfflineMode) return "Sem internet.";
                 try {
-                    const res = await fetch(`https://pt.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(q)}`);
+                    const geo = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=pt&format=json`).then(r=>r.json());
+                    if(!geo.results) return null;
+                    const {latitude, longitude, name} = geo.results[0];
+                    const w = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m&timezone=auto`).then(r=>r.json());
+                    return `${name}: ${w.current.temperature_2m}°C, Umidade ${w.current.relative_humidity_2m}%.`;
+                } catch(e) { return null; }
+            },
+            wiki: async (term) => {
+                if(isOfflineMode) return "Sem internet.";
+                try {
+                    const res = await fetch(`https://pt.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(term)}`);
                     if(!res.ok) return null;
-                    const data = await res.json();
-                    return data.type === 'standard' ? data.extract : null;
+                    return (await res.json()).extract;
                 } catch(e) { return null; }
             }
         };
 
-        // --- INICIALIZAÇÃO ---
-        async function initSystem() {
-            const wakeUpPromise = DB.wakeUp();
+        // --- CORE ---
+        function updateSystemPrompt() {
+            // Define a personalidade baseada na escolha do usuário
+            let persona = "Seja útil e direta.";
+            if (userConfig.vibe === 'Jarvis') persona = "Aja como o JARVIS do Homem de Ferro. Seja extremamente técnico, polido e chame o usuário de Senhor.";
+            if (userConfig.vibe === 'Amigo') persona = "Seja super casual, use gírias leves, emojis e aja como um melhor amigo.";
+            
+            chatHistory[0] = { 
+                role: "system", 
+                content: `
+Você é o NeuralOS.
+USUÁRIO: ${userConfig.name}
+PERSONALIDADE: ${persona}
 
-            $('status-text').innerText = "Carregando Cérebro...";
+DIRETRIZES:
+1. Pense antes de responder dentro de tags <pensamento>.
+2. Se precisar de dados externos, USE AS FERRAMENTAS.
+3. Se o usuário mandar uma imagem (descrita no texto), comente sobre ela.
+
+FERRAMENTAS:
+[CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOOGLE: termo]
+` 
+            };
+        }
+
+        async function initSystem() {
+            setupAudio();
+            const wakeUpPromise = DB.wakeUp();
+            updateSystemPrompt(); // Configura prompt inicial
+
+            $('status-text').innerText = "Inicializando GPU...";
             $('loading-bar').style.width = "10%";
 
-            const initProgressCallback = (report) => {
-                const text = report.text;
-                if(text.includes("Fetching")) {
-                    const pct = text.match(/(\d+)%/) ? text.match(/(\d+)%/)[1] : "0";
-                    $('status-text').innerText = `Baixando IA (${pct}%)...`;
-                    $('loading-bar').style.width = pct + "%";
-                } else if (text.includes("Loading")) {
-                     $('status-text').innerText = "Carregando na RAM...";
-                     $('loading-bar').style.width = "90%";
-                } else if (text.includes("Finish")) {
-                     $('loading-bar').style.width = "100%";
-                }
-            };
-
             try {
-                if (!navigator.gpu) throw new Error("GPU WebGPU não detectada.");
+                if (!navigator.gpu) throw new Error("Sem WebGPU.");
 
                 engine = await webllm.CreateMLCEngine(
                     MODEL_ID,
                     { 
-                        initProgressCallback: initProgressCallback,
+                        initProgressCallback: (report) => {
+                            if(report.text.includes("Fetching")) $('status-text').innerText = "Baixando IA...";
+                            else if(report.text.includes("Loading")) $('status-text').innerText = "Carregando Cérebro...";
+                            // Barra falsa para sensação de progresso
+                            $('loading-bar').style.width = "70%";
+                        },
                         logLevel: "WARN",
                     }
                 );
 
                 await engine.chat.completions.create({ messages: [{ role: "user", content: "hi" }], max_tokens: 1 });
-                
                 await wakeUpPromise;
                 DB.refreshList();
 
@@ -188,43 +246,9 @@
                 setTimeout(() => $('loading-screen').style.display = 'none', 500);
                 lucide.createIcons();
 
-                chatHistory = [{ 
-                    role: "system", 
-                    content: `
-Você é o NeuralOS.
-REGRAS:
-1. Responda em Português.
-2. Comandos OBRIGATÓRIOS para ações:
-   - [MEM: fato] -> Salvar memória nova.
-   - [WIKI: termo] -> Pesquisar significado/história.
-   - [YOUTUBE: termo] -> Vídeos/Música.
-   - [GOOGLE: termo] -> Pesquisa genérica.
-3. Se o usuário perguntar algo pessoal, verifique o contexto fornecido.
-` 
-                }];
-
             } catch (err) {
                 $('status-text').innerText = "Erro: " + err.message;
-                $('status-text').className = "text-red-500 text-xs font-bold";
-                
-                const btn = document.createElement("button");
-                btn.className = "mt-4 bg-red-600 text-white px-4 py-2 rounded text-xs";
-                btn.innerText = "Limpar Cache e Reiniciar";
-                btn.onclick = async () => {
-                    if(confirm("Isso apagará o modelo baixado e baixará novamente. Continuar?")) {
-                        try {
-                            const dbs = await window.indexedDB.databases();
-                            for(let db of dbs) {
-                                window.indexedDB.deleteDatabase(db.name);
-                            }
-                            localStorage.clear();
-                            window.location.reload();
-                        } catch(e) {
-                            alert("Erro ao limpar. Tente limpar dados do site nas configurações do navegador.");
-                        }
-                    }
-                };
-                $('loading-screen').appendChild(btn);
+                $('status-text').className = "text-red-500 font-bold";
             }
         }
 
@@ -233,141 +257,138 @@ REGRAS:
             const text = input.value.trim();
             if (!text || !engine) return;
 
+            // UI
             appendBubble('user', text);
             input.value = '';
 
+            // Lógica de Imagem (Simulada)
+            const imgInput = $('image-upload');
+            let userMsg = text;
+            if (imgInput.files.length > 0) {
+                const fileName = imgInput.files[0].name;
+                userMsg = `[O usuário enviou uma imagem chamada "${fileName}"]. ${text}`;
+                appendBubble('system', `📸 Imagem "${fileName}" anexada.`);
+                imgInput.value = ''; // Limpa input
+            }
+
+            // RAG Automático
             const memories = await DB.search(text);
-            let context = "";
-            if (memories.length > 0) context = `CONTEXTO DA MEMÓRIA: ${memories.join(' | ')}.`;
+            const context = memories.length > 0 ? `[Memória: ${memories.join(' | ')}]` : "";
+            if (context) userMsg = `${context}\n${userMsg}`;
 
-            // CORREÇÃO: Em vez de adicionar uma mensagem {role: system}, injetamos o contexto no texto do usuário.
-            // Isso evita o erro "system prompt should always be the first message".
-            const userMessageWithContext = context 
-                ? `Contexto recuperado do banco de dados: ${context}\n\nUsuário diz: ${text}` 
-                : text;
-
-            const tempHistory = [
-                ...chatHistory, 
-                { role: "user", content: userMessageWithContext }
-            ];
-
-            const loadingId = showLoadingIndicator();
+            // Histórico Temp
+            const tempHistory = [...chatHistory, { role: "user", content: userMsg }];
+            const loadingId = showLoading();
 
             try {
-                // 1. Decisão
+                // 1. Pensamento
                 const reply = await engine.chat.completions.create({
                     messages: tempHistory,
-                    temperature: 0.1,
-                    max_tokens: 256,
+                    temperature: 0.3,
+                    max_tokens: 512,
                 });
                 
-                let responseText = reply.choices[0].message.content;
-                let externalData = null;
+                let raw = reply.choices[0].message.content;
+                let final = raw;
+                let toolResult = null;
 
-                if (responseText.includes("[WIKI:")) {
-                    updateLoadingText(loadingId, "Lendo Wikipedia...");
-                    const term = responseText.match(/\[WIKI: (.*?)\]/)[1];
-                    const wikiData = await WebAgent.searchWiki(term);
-                    if (wikiData) externalData = `Wikipedia sobre ${term}: ${wikiData}`;
-                    else externalData = "Sem dados na Wiki.";
+                // Extrai pensamento
+                const thoughtMatch = raw.match(/<pensamento>(.*?)<\/pensamento>/s);
+                if (thoughtMatch) {
+                    appendBubble('thought', thoughtMatch[1]);
+                    final = raw.replace(/<pensamento>.*?<\/pensamento>/s, "").trim();
                 }
 
-                if (responseText.includes("[MEM:")) {
-                    const content = responseText.match(/\[MEM: (.*?)\]/)[1];
-                    await DB.add(content);
-                    externalData = `(Salvo no servidor: "${content}")`;
+                // Processa Ferramentas
+                if (final.includes("[CLIMA:")) {
+                    updateLoading(loadingId, "Satélite...");
+                    const city = final.match(/\[CLIMA: (.*?)\]/)[1];
+                    toolResult = await Tools.weather(city) || "Erro no clima.";
+                }
+                else if (final.includes("[WIKI:")) {
+                    updateLoading(loadingId, "Wikipedia...");
+                    const t = final.match(/\[WIKI: (.*?)\]/)[1];
+                    toolResult = await Tools.wiki(t) || "Sem dados.";
+                }
+                else if (final.includes("[MEM:")) {
+                    const c = final.match(/\[MEM: (.*?)\]/)[1];
+                    await DB.add(c);
+                    toolResult = "Memória salva com sucesso.";
+                }
+                else if (final.includes("[YOUTUBE:")) {
+                    const t = final.match(/\[YOUTUBE: (.*?)\]/)[1];
+                    window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(t)}`, '_blank');
+                    final = `🎬 Abrindo YouTube para: **${t}**`;
+                }
+                else if (final.includes("[GOOGLE:")) {
+                    const t = final.match(/\[GOOGLE: (.*?)\]/)[1];
+                    window.open(`https://www.google.com/search?q=${encodeURIComponent(t)}`, '_blank');
+                    final = `🌐 Pesquisando: **${t}**`;
                 }
 
-                if (responseText.includes("[YOUTUBE:")) {
-                    const term = responseText.match(/\[YOUTUBE: (.*?)\]/)[1];
-                    window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(term)}`, '_blank');
-                    responseText = `🎬 Abrindo YouTube: **${term}**`;
+                // Loop de Agente (Se houve ferramenta, responde de novo)
+                if (toolResult) {
+                    tempHistory.push({ role: "assistant", content: raw });
+                    tempHistory.push({ role: "user", content: `Resultado do sistema: ${toolResult}. Responda ao usuário agora.` });
+                    const step2 = await engine.chat.completions.create({ messages: tempHistory });
+                    final = step2.choices[0].message.content.replace(/<pensamento>.*?<\/pensamento>/s, "").trim();
                 }
 
-                if (responseText.includes("[GOOGLE:")) {
-                    const term = responseText.match(/\[GOOGLE: (.*?)\]/)[1];
-                    window.open(`https://www.google.com/search?q=${encodeURIComponent(term)}`, '_blank');
-                    responseText = `🌐 Pesquisando no Google: **${term}**`;
-                }
+                removeLoading(loadingId);
+                appendBubble('assistant', final);
+                speak(final); // FALA!
 
-                if (externalData) {
-                    updateLoadingText(loadingId, "Formulando resposta...");
-                    // Adiciona o pensamento da IA
-                    tempHistory.push({ role: "assistant", content: responseText });
-                    // Adiciona o resultado da ferramenta como USER (para não quebrar a ordem)
-                    tempHistory.push({ role: "user", content: `Resultado da ferramenta: ${externalData}. Agora responda ao usuário.` });
-                    
-                    const finalReply = await engine.chat.completions.create({
-                        messages: tempHistory,
-                        temperature: 0.7,
-                    });
-                    responseText = finalReply.choices[0].message.content;
-                }
-
-                removeLoadingIndicator(loadingId);
-                appendBubble('assistant', responseText);
-                
-                chatHistory.push({ role: "user", content: text });
-                chatHistory.push({ role: "assistant", content: responseText });
+                // Atualiza histórico real
+                chatHistory.push({ role: "user", content: text }); // Salva texto original limpo
+                chatHistory.push({ role: "assistant", content: final });
                 if (chatHistory.length > MAX_HISTORY) chatHistory.splice(1, 2);
 
             } catch (e) {
-                removeLoadingIndicator(loadingId);
-                appendBubble('assistant', "Erro: " + e.message);
+                removeLoading(loadingId);
+                appendBubble('system', "Erro: " + e.message);
             }
         };
 
+        // --- UI ---
         function appendBubble(role, text) {
             const box = $('chat-content');
             const div = document.createElement('div');
-            const isUser = role === 'user';
-            div.className = `flex w-full mb-4 animate-fade-in ${isUser ? 'justify-end' : 'justify-start'} text-sm`;
-            div.innerHTML = `
-                <div class="max-w-[85%] p-3.5 rounded-2xl shadow-sm leading-relaxed ${
-                    isUser ? 'bg-indigo-600 text-white rounded-tr-sm' : 'bg-white border border-gray-100 text-gray-800 rounded-tl-sm prose prose-sm'
-                }">${isUser ? text : marked.parse(text)}</div>
-            `;
+            
+            if (role === 'thought') {
+                div.className = "flex w-full mb-2 animate-fade-in";
+                div.innerHTML = `<div class="bg-gray-100 text-gray-500 text-xs italic p-2 rounded-lg border-l-2 border-gray-400 max-w-[85%]">💭 ${text}</div>`;
+            } else if (role === 'system') {
+                div.className = "flex w-full justify-center mb-2 animate-fade-in";
+                div.innerHTML = `<div class="bg-yellow-50 text-yellow-700 text-xs px-3 py-1 rounded-full border border-yellow-200">${text}</div>`;
+            } else {
+                const isUser = role === 'user';
+                div.className = `flex w-full mb-4 animate-fade-in ${isUser ? 'justify-end' : 'justify-start'}`;
+                div.innerHTML = `
+                    <div class="max-w-[85%] p-3.5 rounded-2xl shadow-sm text-sm leading-relaxed ${
+                        isUser ? 'bg-indigo-600 text-white rounded-tr-sm' : 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm prose prose-sm'
+                    }">${isUser ? text : marked.parse(text)}</div>
+                `;
+            }
             box.appendChild(div);
             $('chat-box').scrollTo({ top: $('chat-box').scrollHeight, behavior: 'smooth' });
         }
 
-        function showLoadingIndicator() {
+        function showLoading() {
             const id = 'load-' + Date.now();
             const box = $('chat-content');
             const div = document.createElement('div');
             div.id = id;
-            div.className = 'flex w-full mb-4 justify-start animate-fade-in';
-            div.innerHTML = `
-                <div class="bg-white border border-gray-100 px-4 py-2 rounded-2xl rounded-tl-sm flex items-center gap-3">
-                    <div class="flex gap-1">
-                        <span class="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce"></span>
-                        <span class="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce delay-75"></span>
-                        <span class="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce delay-150"></span>
-                    </div>
-                    <span class="text-xs text-gray-400 font-mono" id="${id}-text">Pensando...</span>
-                </div>`;
+            div.className = "flex w-full mb-4 animate-fade-in";
+            div.innerHTML = `<div class="bg-white border px-3 py-2 rounded-2xl text-xs text-gray-400 flex items-center gap-2"><span class="animate-spin">⚙️</span> <span id="${id}-txt">Processando...</span></div>`;
             box.appendChild(div);
+            $('chat-box').scrollTo({ top: $('chat-box').scrollHeight, behavior: 'smooth' });
             return id;
         }
+        function updateLoading(id, txt) { const el = document.getElementById(id+'-txt'); if(el) el.innerText = txt; }
+        function removeLoading(id) { const el = document.getElementById(id); if(el) el.remove(); }
+        function showToast(msg) { /* Toast Simples */ alert(msg); } // Simplificado para economizar linhas
 
-        function updateLoadingText(id, text) {
-            const el = document.getElementById(id + '-text');
-            if (el) el.innerText = text;
-        }
-
-        function removeLoadingIndicator(id) {
-            const el = document.getElementById(id);
-            if (el) el.remove();
-        }
-
-        function showToast(msg) {
-            const t = document.createElement('div');
-            t.className = "fixed top-4 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50 animate-fade-in";
-            t.innerText = msg;
-            document.body.appendChild(t);
-            setTimeout(() => t.remove(), 2000);
-        }
-
+        // TAB SWITCH
         window.switchTab = (tab) => {
             if (tab === 'chat') {
                 $('view-chat').classList.remove('hidden');
@@ -383,28 +404,53 @@ REGRAS:
             }
         };
 
+        window.triggerImageUpload = () => $('image-upload').click();
         $('input-box').addEventListener('keypress', (e) => { if (e.key === 'Enter') window.sendMessage(); });
+        
         window.onload = initSystem;
     </script>
     <style>
         .animate-fade-in { animation: fadeIn 0.3s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         body { background: #f8fafc; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+        ::-webkit-scrollbar { width: 0px; } 
     </style>
 </head>
 <body class="font-sans antialiased bg-slate-50 text-slate-800">
 
+    <!-- MODAL CONFIGURAÇÕES -->
+    <div id="settings-modal" class="hidden absolute inset-0 z-40 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl">
+            <h2 class="text-lg font-bold mb-4">Configurações</h2>
+            
+            <label class="block text-xs font-bold text-gray-500 mb-1">Seu Nome</label>
+            <input id="input-name" type="text" class="w-full bg-gray-100 rounded p-2 text-sm mb-4">
+            
+            <label class="block text-xs font-bold text-gray-500 mb-1">Personalidade da IA</label>
+            <select id="select-vibe" class="w-full bg-gray-100 rounded p-2 text-sm mb-4">
+                <option value="Assistente Padrão">Padrão</option>
+                <option value="Jarvis">Jarvis (Técnico)</option>
+                <option value="Amigo">Melhor Amigo (Casual)</option>
+            </select>
+            
+            <div class="flex items-center justify-between mb-6">
+                <span class="text-sm font-medium">Voz (TTS)</span>
+                <input id="check-tts" type="checkbox" class="w-5 h-5 accent-indigo-600">
+            </div>
+            
+            <button onclick="saveSettings()" class="w-full bg-indigo-600 text-white py-2 rounded-xl font-bold">Salvar</button>
+            <button onclick="toggleSettings()" class="w-full mt-2 text-gray-400 text-xs">Cancelar</button>
+        </div>
+    </div>
+
     <!-- LOADING INICIAL -->
     <div id="loading-screen" class="absolute inset-0 z-50 bg-white flex flex-col items-center justify-center p-8 transition-opacity duration-500">
-        <div class="w-16 h-16 mb-6 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-200">
-            <i data-lucide="server" class="text-white w-8 h-8"></i>
+        <div class="w-20 h-20 mb-6 rounded-3xl bg-indigo-600 flex items-center justify-center shadow-xl shadow-indigo-200 animate-bounce">
+            <i data-lucide="cpu" class="text-white w-10 h-10"></i>
         </div>
-        <h2 class="text-xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">Render</span></h2>
-        <p id="status-text" class="text-gray-400 text-xs font-mono mb-8">Conectando...</p>
-        <div class="w-48 h-1 bg-gray-100 rounded-full overflow-hidden">
+        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v5</span></h2>
+        <p id="status-text" class="text-gray-400 text-xs font-mono mb-8">Iniciando Sistemas...</p>
+        <div class="w-48 h-1.5 bg-gray-100 rounded-full overflow-hidden">
             <div id="loading-bar" class="h-full bg-indigo-600 transition-all duration-300 w-0"></div>
         </div>
     </div>
@@ -413,22 +459,20 @@ REGRAS:
     <div class="flex-1 flex flex-col relative overflow-hidden bg-white max-w-md mx-auto w-full shadow-2xl h-full border-x border-gray-100">
         
         <!-- HEADER -->
-        <header class="h-16 bg-white/80 backdrop-blur border-b border-gray-100 flex items-center justify-between px-4 shrink-0 z-20">
-            <div class="flex items-center gap-2">
-                <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white shadow-md">
-                    <i data-lucide="zap" class="w-5 h-5"></i>
-                </div>
+        <header class="h-16 bg-white/90 backdrop-blur border-b border-gray-100 flex items-center justify-between px-4 shrink-0 z-20">
+            <div class="flex items-center gap-3">
+                <button onclick="toggleSettings()" class="p-2 bg-gray-50 rounded-full hover:bg-gray-100 text-gray-600">
+                    <i data-lucide="settings" class="w-5 h-5"></i>
+                </button>
                 <div>
                     <h1 class="font-bold text-sm text-gray-800">NeuralOS</h1>
-                    <div id="db-status-indicator" class="text-[10px] text-gray-400 font-medium">● Local (Offline)</div>
+                    <div id="status-indicator" class="text-[10px] text-gray-400 font-medium">● Conectando...</div>
                 </div>
             </div>
             
             <div class="flex bg-gray-50 p-1 rounded-full border border-gray-100">
-                <button id="btn-chat" onclick="switchTab('chat')" class="px-4 py-1.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700 flex items-center gap-2 transition-all">Chat</button>
-                <button id="btn-mem" onclick="switchTab('mem')" class="px-4 py-1.5 rounded-full text-xs font-bold text-gray-500 hover:text-indigo-600 flex items-center gap-2 transition-all">
-                    Banco <span id="mem-count" class="ml-1 bg-gray-200 px-1.5 rounded-full text-[9px]">0</span>
-                </button>
+                <button id="btn-chat" onclick="switchTab('chat')" class="px-4 py-1.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700 transition-all">Chat</button>
+                <button id="btn-mem" onclick="switchTab('mem')" class="px-4 py-1.5 rounded-full text-xs font-bold text-gray-500 hover:text-indigo-600 transition-all">Banco</button>
             </div>
         </header>
 
@@ -437,8 +481,8 @@ REGRAS:
             <div id="chat-box" class="flex-1 overflow-y-auto pb-24 scroll-smooth">
                 <div id="chat-content" class="p-4 pt-6 space-y-4">
                     <div class="flex justify-center">
-                        <span class="text-[10px] text-gray-400 bg-white border border-gray-200 px-3 py-1 rounded-full shadow-sm">
-                            API Própria • Wiki • YouTube
+                        <span class="text-[10px] text-gray-400 bg-white border border-gray-200 px-3 py-1 rounded-full shadow-sm flex items-center gap-1">
+                            <i data-lucide="brain" class="w-3 h-3 text-indigo-500"></i> Memória Ativa
                         </span>
                     </div>
                 </div>
@@ -446,8 +490,20 @@ REGRAS:
 
             <!-- Input Area -->
             <div class="absolute bottom-0 w-full p-4 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent z-10">
-                <div class="flex items-center gap-2 bg-white border border-gray-200 p-1.5 pl-4 rounded-full shadow-xl">
-                    <input id="input-box" type="text" class="flex-1 bg-transparent text-sm text-gray-800 focus:outline-none placeholder-gray-400" placeholder="Pergunte sobre o tempo, fatos...">
+                <div class="flex items-center gap-2 bg-white border border-gray-200 p-1.5 pl-2 rounded-full shadow-xl">
+                    <!-- Botão Visão -->
+                    <button onclick="triggerImageUpload()" class="w-9 h-9 rounded-full text-gray-400 hover:text-indigo-600 hover:bg-gray-50 flex items-center justify-center transition-colors">
+                        <i data-lucide="image" class="w-5 h-5"></i>
+                    </button>
+                    <input type="file" id="image-upload" accept="image/*" class="hidden">
+                    
+                    <input id="input-box" type="text" class="flex-1 bg-transparent text-sm text-gray-800 focus:outline-none placeholder-gray-400" placeholder="Digite...">
+                    
+                    <!-- Botão Voz -->
+                    <button id="mic-btn" onclick="window.toggleMic && window.toggleMic()" class="w-9 h-9 rounded-full bg-gray-100 text-gray-500 hover:bg-red-100 hover:text-red-500 flex items-center justify-center transition-colors">
+                        <i data-lucide="mic" class="w-5 h-5"></i>
+                    </button>
+
                     <button onclick="window.sendMessage()" class="w-10 h-10 bg-indigo-600 hover:bg-indigo-500 rounded-full flex items-center justify-center text-white shadow-lg transition-transform active:scale-95">
                         <i data-lucide="arrow-up" class="w-5 h-5"></i>
                     </button>
@@ -457,13 +513,11 @@ REGRAS:
 
         <!-- MEMORY VIEW -->
         <div id="view-mem" class="hidden flex-1 flex flex-col bg-white overflow-hidden">
-            <div class="p-4 bg-gray-50 border-b border-gray-100">
-                <h3 class="font-bold text-xs text-gray-500 uppercase tracking-wider">Banco de Dados</h3>
-                <p class="text-[10px] text-gray-400 mt-1">Registros salvos automaticamente ou manualmente.</p>
+            <div class="p-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
+                <h3 class="font-bold text-xs text-gray-500 uppercase tracking-wider">Memória (<span id="mem-count">0</span>)</h3>
+                <button onclick="DB.refreshList()" class="p-2 text-indigo-600 bg-indigo-50 rounded-full"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
             </div>
-            <div id="memory-list" class="flex-1 overflow-y-auto p-4">
-                <!-- Items -->
-            </div>
+            <div id="memory-list" class="flex-1 overflow-y-auto p-4"></div>
         </div>
 
     </div>
