@@ -3,13 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <title>NeuralOS v7.2 - Stable</title>
+    <title>NeuralOS v7.3 - Ultimate</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- PDF Generator -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <!-- PDF Engine Profissional (PDFMake) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.9/pdfmake.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.9/vfs_fonts.js"></script>
+    
+    <!-- Python Engine (Pyodide) - Carregado sob demanda -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
     
     <script type="module">
         import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.72/+esm";
@@ -27,6 +32,7 @@
         let recognition = null;
         let availableVoices = [];
         let currentCanvasCode = ""; 
+        let pyodideInstance = null;
         
         let userConfig = {
             name: localStorage.getItem('neural_user_name') || 'Admin',
@@ -38,7 +44,7 @@
 
         const $ = (id) => document.getElementById(id);
 
-        // --- SISTEMA DE TEMA (CORRIGIDO) ---
+        // --- SISTEMA DE TEMA ---
         function applyTheme() {
             const body = document.body;
             const appContainer = $('main-app-container');
@@ -49,18 +55,13 @@
             const canvasModal = $('canvas-modal-header');
             
             if (userConfig.amoled) {
-                // Modo Escuro Real (Preto Absoluto)
                 body.className = "font-sans antialiased bg-black text-gray-200 h-full w-full overflow-hidden flex flex-col";
                 appContainer.className = appContainer.className.replace('bg-white', 'bg-black').replace('border-gray-100', 'border-gray-800');
                 
-                // Input Bar 
                 inputContainer.className = "w-full p-4 bg-black z-10 transition-colors shrink-0 border-t border-gray-800";
                 inputWrapper.className = "flex items-center gap-2 border p-1.5 pl-2 rounded-full shadow-sm bg-gray-900 border-gray-700";
                 
-                // Headers
                 headers.forEach(h => h.className = h.className.replace('bg-white/90', 'bg-black/90').replace('border-gray-100', 'border-gray-800'));
-                
-                // Modals
                 modals.forEach(m => m.classList.replace('bg-white', 'bg-gray-900'));
                 if(canvasModal) canvasModal.classList.replace('bg-gray-900', 'bg-black');
                 
@@ -68,7 +69,6 @@
                 inputBox.classList.replace('text-gray-800', 'text-white');
                 inputBox.classList.replace('placeholder-gray-400', 'placeholder-gray-600');
             } else {
-                // Modo Claro
                 body.className = "font-sans antialiased bg-slate-50 text-slate-800 h-full w-full overflow-hidden flex flex-col";
                 appContainer.className = appContainer.className.replace('bg-black', 'bg-white').replace('border-gray-800', 'border-gray-100');
                 
@@ -76,7 +76,6 @@
                 inputWrapper.className = "flex items-center gap-2 border p-1.5 pl-2 rounded-full shadow-sm bg-white border-gray-200";
                 
                 headers.forEach(h => h.className = h.className.replace('bg-black/90', 'bg-white/90').replace('border-gray-800', 'border-gray-100'));
-                
                 modals.forEach(m => m.classList.replace('bg-gray-900', 'bg-white'));
                 
                 const inputBox = $('input-box');
@@ -116,7 +115,7 @@
             window.speechSynthesis.speak(utterance);
         }
 
-        // --- SISTEMA CANVAS PRO ---
+        // --- SISTEMA CANVAS ---
         window.openCanvas = (code, type) => {
             currentCanvasCode = code; 
             const modal = $('canvas-modal');
@@ -161,7 +160,7 @@
         window.addEventListener('message', (event) => {
             const consoleDiv = $('canvas-console');
             if (event.data.type === 'error') {
-                consoleDiv.innerHTML += `<div class="text-red-400 mt-1">❌ Erro (L${event.data.line}): ${event.data.message}</div>`;
+                consoleDiv.innerHTML += `<div class="text-red-400 mt-1">❌ Erro: ${event.data.message}</div>`;
                 $('fix-code-btn').classList.remove('hidden'); 
                 $('fix-code-btn').dataset.error = event.data.message;
             } else if (event.data.type === 'log') {
@@ -172,7 +171,7 @@
         window.fixCanvasCode = () => {
             const errorMsg = $('fix-code-btn').dataset.error;
             closeCanvas();
-            const prompt = `O código gerado deu este erro: "${errorMsg}". Por favor, corrija o código abaixo e execute novamente:\n\n${currentCanvasCode}`;
+            const prompt = `O código gerado deu erro: "${errorMsg}". Corrija e reenvie:\n\n${currentCanvasCode}`;
             $('input-box').value = prompt;
             window.sendMessage();
         };
@@ -183,63 +182,67 @@
             $('fix-code-btn').classList.add('hidden');
         };
 
-        // --- SISTEMA DE PDF OTIMIZADO (V2) ---
+        // --- FERRAMENTAS AVANÇADAS (PDF, Python, Alertas) ---
         const Tools = {
             generatePDF: async (title, content) => {
                 showToast("Gerando PDF..."); 
-                
-                // Pequeno delay para a UI atualizar antes do processamento pesado
-                await new Promise(r => setTimeout(r, 100));
+                await new Promise(r => setTimeout(r, 100)); // UI Refresh
 
                 try {
-                    const { jsPDF } = window.jspdf;
-                    const doc = new jsPDF();
+                    // PDFMake Definition
+                    const docDefinition = {
+                        content: [
+                            { text: title || "Documento NeuralOS", style: 'header' },
+                            { text: content, style: 'body' }
+                        ],
+                        styles: {
+                            header: { fontSize: 22, bold: true, margin: [0, 0, 0, 10], color: '#2563eb' },
+                            body: { fontSize: 12, lineHeight: 1.5, color: '#334155' }
+                        },
+                        defaultStyle: { font: 'Roboto' }
+                    };
                     
-                    const pageWidth = doc.internal.pageSize.getWidth();
-                    const pageHeight = doc.internal.pageSize.getHeight();
-                    const margin = 15;
-                    const maxTextWidth = pageWidth - (margin * 2);
-                    
-                    // Limpeza de Markdown básico para o PDF ficar limpo
-                    const cleanContent = content
-                        .replace(/\*\*(.*?)\*\*/g, '$1') // Negrito
-                        .replace(/\*(.*?)\*/g, '$1') // Itálico
-                        .replace(/`/g, '') // Código inline
-                        .replace(/#+\s/g, ''); // Headers
-
-                    // Título
-                    doc.setFont("helvetica", "bold");
-                    doc.setFontSize(18);
-                    doc.text(title || "Relatório NeuralOS", margin, 20);
-                    
-                    // Conteúdo
-                    doc.setFont("helvetica", "normal");
-                    doc.setFontSize(11);
-                    
-                    // Quebra o texto em linhas que cabem na página
-                    const lines = doc.splitTextToSize(cleanContent, maxTextWidth);
-                    
-                    let cursorY = 35; 
-                    const lineHeight = 6;
-                    
-                    // Loop de renderização seguro
-                    for (let i = 0; i < lines.length; i++) {
-                        if (cursorY + lineHeight > pageHeight - margin) {
-                            doc.addPage();
-                            cursorY = 20; 
-                        }
-                        doc.text(lines[i], margin, cursorY);
-                        cursorY += lineHeight;
-                    }
-                    
-                    const fileName = `${(title || 'documento').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`;
-                    doc.save(fileName);
-                    return `PDF "${fileName}" gerado e baixado.`;
+                    pdfMake.createPdf(docDefinition).download(`${(title || 'doc').replace(/[^a-z0-9]/gi, '_')}.pdf`);
+                    return "PDF gerado e baixado com sucesso via PDFMake.";
                 } catch (e) {
                     console.error(e);
-                    return "Erro interno na geração do PDF. Tente um texto menor.";
+                    return "Erro crítico PDF: " + e.message;
                 }
             },
+            
+            runPython: async (code) => {
+                showToast("Inicializando Python...");
+                try {
+                    if (!pyodideInstance) {
+                        pyodideInstance = await loadPyodide();
+                    }
+                    // Redireciona stdout para capturar prints
+                    pyodideInstance.setStdout({ batched: (msg) => console.log(msg) });
+                    const result = await pyodideInstance.runPythonAsync(code);
+                    return result !== undefined ? String(result) : "Executado sem retorno (verifique prints).";
+                } catch (e) {
+                    return "Erro Python: " + e.message;
+                }
+            },
+
+            scheduleAlert: async (minutes, message) => {
+                const ms = parseFloat(minutes) * 60000;
+                if (isNaN(ms)) return "Tempo inválido.";
+                
+                if (Notification.permission !== 'granted') await Notification.requestPermission();
+                
+                setTimeout(() => {
+                    if (Notification.permission === 'granted') {
+                        new Notification("Lembrete NeuralOS", { body: message, icon: 'https://cdn-icons-png.flaticon.com/512/4712/4712035.png' });
+                    } else {
+                        alert(`⏰ LEMBRETE: ${message}`);
+                    }
+                    speak(`Lembrete: ${message}`);
+                }, ms);
+                
+                return `Alerta definido para daqui a ${minutes} minutos.`;
+            },
+
             weather: async (city) => {
                 if(isOfflineMode) return "Sem internet.";
                 try {
@@ -250,6 +253,7 @@
                     return `${name}: ${w.current.temperature_2m}°C, Umidade ${w.current.relative_humidity_2m}%.`;
                 } catch(e) { return null; }
             },
+            
             wiki: async (term) => {
                 if(isOfflineMode) return "Sem internet.";
                 try {
@@ -262,19 +266,21 @@
 
         // --- CORE ---
         function updateSystemPrompt() {
-            let persona = "Seja um assistente inteligente.";
+            let persona = "Seja um desenvolvedor full-stack inteligente.";
             if (userConfig.vibe === 'Jarvis') persona = "Aja como JARVIS. Técnico, preciso.";
             if (userConfig.vibe === 'Amigo') persona = "Seja casual, brother.";
             
             chatHistory[0] = { 
                 role: "system", 
                 content: `
-Você é o NeuralOS v7.2. USUÁRIO: ${userConfig.name}. PERSONALIDADE: ${persona}.
-AUTO-LEARNING ATIVO:
-1. Se não souber algo, use [WIKI: termo] para aprender e depois [MEM: resumo] para salvar no banco.
-2. Ao receber [WIKI] ou [CLIMA], combine a informação na resposta final.
-3. Se o usuário pedir um PDF, crie o conteúdo e use [PDF: titulo | conteudo].
-4. Para código, use \`\`\`html ou \`\`\`javascript.
+Você é o NeuralOS v7.3. USUÁRIO: ${userConfig.name}. PERSONALIDADE: ${persona}.
+DIRETRIZES:
+1. Use tags <pensamento> para planejar.
+2. Se pedir código HTML/JS visual, use blocos \`\`\`html.
+3. Se pedir PDF, use [PDF: titulo | conteudo].
+4. Se pedir cálculo complexo ou script, use [PYTHON: codigo].
+5. Se pedir lembrete, use [ALERTA: minutos | texto].
+6. Ferramentas: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOOGLE: termo].
 ` 
             };
         }
@@ -360,15 +366,24 @@ AUTO-LEARNING ATIVO:
 
                 // Parser de Ferramentas
                 if (final.includes("[PDF:")) {
-                    updateLoading(loadingId, "Gerando PDF...");
+                    updateLoading(loadingId, "Gerando PDF (V3)...");
                     const match = final.match(/\[PDF: (.*?)\s*\|\s*([\s\S]*?)\]/);
                     if (match) {
-                        const title = match[1];
-                        const content = match[2];
-                        toolResult = await Tools.generatePDF(title, content);
+                        toolResult = await Tools.generatePDF(match[1], match[2]);
                         final = final.replace(/\[PDF:.*?\]/s, `📄 ${toolResult}`);
-                    } else {
-                        toolResult = "Erro formato PDF. Use [PDF: Titulo | Conteudo].";
+                    } else { toolResult = "Erro formato PDF."; }
+                }
+                else if (final.includes("[PYTHON:")) {
+                    updateLoading(loadingId, "Rodando Python...");
+                    const code = final.match(/\[PYTHON: ([\s\S]*?)\]/)[1];
+                    toolResult = await Tools.runPython(code);
+                    final = final.replace(/\[PYTHON:.*?\]/s, `🐍 Saída Python: \`${toolResult}\``);
+                }
+                else if (final.includes("[ALERTA:")) {
+                    const match = final.match(/\[ALERTA: (.*?)\s*\|\s*(.*?)\]/);
+                    if (match) {
+                        toolResult = await Tools.scheduleAlert(match[1], match[2]);
+                        final = final.replace(/\[ALERTA:.*?\]/s, `⏰ ${toolResult}`);
                     }
                 }
                 else if (final.includes("[IMG:")) {
@@ -381,14 +396,14 @@ AUTO-LEARNING ATIVO:
                     toolResult = await Tools.weather(city) || "Erro clima.";
                 }
                 else if (final.includes("[WIKI:")) {
-                    updateLoading(loadingId, "Lendo Wiki...");
+                    updateLoading(loadingId, "Wiki...");
                     const t = final.match(/\[WIKI: (.*?)\]/)[1];
                     toolResult = await Tools.wiki(t) || "Sem dados.";
                 }
                 else if (final.includes("[MEM:")) {
                     const c = final.match(/\[MEM: (.*?)\]/)[1];
                     await DB.add(c);
-                    toolResult = "Info salva no banco de dados.";
+                    toolResult = "Salvo.";
                 }
                 else if (final.includes("[YOUTUBE:")) {
                     const t = final.match(/\[YOUTUBE: (.*?)\]/)[1];
@@ -403,7 +418,7 @@ AUTO-LEARNING ATIVO:
 
                 if (toolResult) {
                     tempHistory.push({ role: "assistant", content: raw });
-                    tempHistory.push({ role: "user", content: `Resultado Sistema: ${toolResult}. Continue respondendo.` });
+                    tempHistory.push({ role: "user", content: `Resultado Sistema: ${toolResult}. Continue.` });
                     const step2 = await engine.chat.completions.create({ messages: tempHistory });
                     final = step2.choices[0].message.content.replace(/<pensamento>.*?<\/pensamento>/s, "").trim();
                 }
@@ -645,7 +660,7 @@ AUTO-LEARNING ATIVO:
         <div class="w-20 h-20 mb-6 rounded-3xl bg-indigo-600 flex items-center justify-center shadow-xl animate-bounce">
             <i data-lucide="cpu" class="text-white w-10 h-10"></i>
         </div>
-        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v7.2</span></h2>
+        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v7.3</span></h2>
         <p id="status-text" class="text-gray-400 text-xs font-mono mb-8">Iniciando...</p>
         <div class="w-48 h-1.5 bg-gray-100 rounded-full overflow-hidden">
             <div id="loading-bar" class="h-full bg-indigo-600 transition-all duration-300 w-0"></div>
