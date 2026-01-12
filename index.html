@@ -11,11 +11,12 @@
         import * as webllm from "https://esm.run/@mlc-ai/web-llm";
 
         // --- CONFIGURAÇÃO ---
-        // Mantemos o 3B, mas vamos extrair o máximo dele com Prompt Engineering.
+        // Llama 3.2 3B: O equilíbrio entre inteligência e, agora com ajustes, performance.
         const selectedModel = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
 
         let engine = null;
         let chatHistory = [];
+        const MAX_HISTORY = 6; // OTIMIZAÇÃO: Mantém apenas as últimas 6 trocas para evitar lentidão
 
         const $ = (id) => document.getElementById(id);
 
@@ -45,11 +46,11 @@
                     selectedModel,
                     { 
                         initProgressCallback: initProgressCallback,
-                        logLevel: "INFO"
+                        logLevel: "WARN" // Menos logs para economizar processamento
                     }
                 );
                 
-                // Warm-up
+                // Warm-up (Aquecimento rápido)
                 await engine.chat.completions.create({
                     messages: [{ role: "user", content: "oi" }],
                     max_tokens: 1,
@@ -58,21 +59,21 @@
                 setTimeout(() => $('loading-container').style.display = 'none', 500);
                 $('send-btn').disabled = false;
                 
-                // --- PROMPT DE ALTA INTELIGÊNCIA ---
-                // Instruções explícitas para raciocínio lógico.
+                // --- PROMPT OTIMIZADO ---
+                // Mais direto para evitar que a IA pense demais antes de começar a escrever
                 const systemPrompt = `
-Você é uma Inteligência Artificial especialista e altamente capaz.
-SUAS DIRETRIZES:
-1. Raciocínio: Antes de responder perguntas complexas, pense passo a passo.
-2. Idioma: Responda SEMPRE em Português do Brasil de forma natural e culta.
-3. Personalidade: Seja prestativa, direta e evite respostas vagas como "não sei". Se não souber, use a ferramenta de busca.
-4. Contexto: Lembre-se que você está rodando localmente em um dispositivo potente.
+Você é uma IA assistente especialista.
+DIRETRIZES:
+1. Responda em Português do Brasil.
+2. Seja direta e prestativa.
+3. Não divague desnecessariamente.
 
 FERRAMENTAS:
-- Use [BUSCAR: termo] se precisar de fatos atuais.
-- Use [SALVAR: dados] para guardar informações importantes.
+- [BUSCAR: termo]
+- [SALVAR: dados]
 `;
-                chatHistory.push({ role: "system", content: systemPrompt });
+                // Inicializa histórico apenas com o System Prompt
+                chatHistory = [{ role: "system", content: systemPrompt }];
 
             } catch (err) {
                 $('loading-container').style.display = 'flex';
@@ -113,9 +114,19 @@ FERRAMENTAS:
             if (role === 'assistant') div.innerHTML = marked.parse(text);
             else div.innerText = text;
             
-            // Scroll forçado para o final
             chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
             return div;
+        }
+
+        // Função para gerenciar o tamanho da memória e evitar lentidão
+        function manageHistory(newRole, newContent) {
+            chatHistory.push({ role: newRole, content: newContent });
+            
+            // Mantém sempre o System Prompt (índice 0) + as últimas MAX_HISTORY mensagens
+            if (chatHistory.length > MAX_HISTORY + 1) {
+                // Remove a mensagem mais antiga (pula o índice 0 que é o system)
+                chatHistory.splice(1, 1);
+            }
         }
 
         window.sendMessage = async () => {
@@ -125,20 +136,20 @@ FERRAMENTAS:
 
             appendMessage('user', text);
             input.value = '';
-            // Hack para mobile: focar novamente mantém teclado aberto, mas pode cobrir. 
-            // Vamos deixar o usuário decidir se fecha ou não.
             
-            chatHistory.push({ role: "user", content: text });
+            // Adiciona ao histórico com gerenciamento de tamanho
+            manageHistory("user", text);
 
             const responseId = 'msg-' + Date.now();
-            appendMessage('assistant', '<span class="animate-pulse text-blue-300">Analisando...</span>', responseId);
+            // Indicador visual mais claro de processamento
+            appendMessage('assistant', '<span class="flex items-center gap-2 text-blue-300"><span class="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></span> Gerando...</span>', responseId);
 
             try {
+                // OTIMIZAÇÃO: Removido repetition_penalty e temperature ajustada
                 const chunks = await engine.chat.completions.create({
                     messages: chatHistory,
-                    temperature: 0.6, // Reduzido para maior precisão (menos alucinação)
-                    repetition_penalty: 1.1, // Evita repetição de frases
-                    max_tokens: 2048,
+                    temperature: 0.7, 
+                    max_tokens: 1024, // Limite seguro para evitar loops infinitos
                     stream: true
                 });
 
@@ -147,6 +158,8 @@ FERRAMENTAS:
                 for await (const chunk of chunks) {
                     const content = chunk.choices[0]?.delta?.content || "";
                     fullResponse += content;
+                    
+                    // Atualiza a tela a cada chunk para sensação de velocidade
                     if (!fullResponse.includes("[BUSCAR:") && !fullResponse.includes("[SALVAR:")) {
                         appendMessage('assistant', fullResponse, responseId);
                     }
@@ -159,7 +172,8 @@ FERRAMENTAS:
                      document.getElementById(responseId).remove();
                      handleSaveTool(fullResponse);
                 } else {
-                    chatHistory.push({ role: "assistant", content: fullResponse });
+                    // Adiciona resposta final ao histórico
+                    manageHistory("assistant", fullResponse);
                 }
 
             } catch (err) {
@@ -170,13 +184,16 @@ FERRAMENTAS:
         async function handleSearchTool(command) {
             const query = command.match(/\[BUSCAR: (.*?)\]/)[1];
             appendMessage('assistant', `🔎 <i>Buscando dados sobre: "${query}"...</i>`);
-            // Simulação mais rápida
             setTimeout(async () => {
-                const fakeResult = `(Simulado) Informação não encontrada na base local, mas a busca externa retornaria dados sobre ${query}.`;
-                chatHistory.push({ role: "system", content: `[RESULTADO DA BUSCA]: "${fakeResult}"` });
+                const fakeResult = `(Simulado) Dados encontrados sobre ${query}.`;
+                // Adiciona resultado como sistema, mas sem estourar o histórico
+                manageHistory("system", `[RESULTADO]: "${fakeResult}"`);
+                
                 const followUp = await engine.chat.completions.create({ messages: chatHistory });
-                appendMessage('assistant', followUp.choices[0].message.content);
-                chatHistory.push({ role: "assistant", content: followUp.choices[0].message.content });
+                const finalText = followUp.choices[0].message.content;
+                
+                appendMessage('assistant', finalText);
+                manageHistory("assistant", finalText);
             }, 300);
         }
 
@@ -186,7 +203,7 @@ FERRAMENTAS:
             savedItems.push({ data: new Date().toISOString(), content: data });
             localStorage.setItem('ia_memoria', JSON.stringify(savedItems));
             appendMessage('assistant', `💾 <i>Memorizado.</i>`);
-            chatHistory.push({ role: "assistant", content: `Memorizado.` });
+            manageHistory("assistant", "Informação salva com sucesso.");
         }
 
         $('user-input').addEventListener('keypress', (e) => {
@@ -199,31 +216,28 @@ FERRAMENTAS:
         @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
         
-        /* Correção Crítica para Mobile */
         body { 
             height: 100dvh; 
             display: flex; 
             flex-direction: column; 
             overflow: hidden; 
-            background-color: #111827; /* bg-gray-900 */
+            background-color: #111827;
         }
         
-        /* Garante que o chat ocupe o espaço e tenha scroll */
         main {
             flex: 1;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
-            padding-bottom: 100px; /* Espaço extra para o footer fixo não cobrir msg */
+            padding-bottom: 100px; 
         }
 
-        /* Input fixo na parte inferior */
         footer {
             position: fixed;
             bottom: 0;
             left: 0;
             width: 100%;
             background-color: #111827;
-            padding-bottom: env(safe-area-inset-bottom, 20px); /* Respeita a área de gestos do iPhone/Android */
+            padding-bottom: env(safe-area-inset-bottom, 20px);
             z-index: 50;
         }
     </style>
@@ -240,7 +254,7 @@ FERRAMENTAS:
             <h1 class="font-bold text-base tracking-wide">Neural <span class="text-blue-400">Pro</span></h1>
         </div>
         <div class="px-2 py-1 bg-gray-800 rounded border border-gray-700 text-[10px] text-gray-400 font-mono">
-            12GB RAM
+            3B Otimizado
         </div>
     </header>
 
@@ -260,9 +274,9 @@ FERRAMENTAS:
     <!-- Chat -->
     <main id="chat-box" class="p-4 space-y-4 w-full max-w-2xl mx-auto scroll-smooth">
         <div class="p-4 rounded-2xl bg-gray-800 border border-gray-700 text-gray-200 shadow-lg mt-4">
-            <p class="mb-1 text-sm font-bold text-blue-400">⚡ Sistema Pronto</p>
+            <p class="mb-1 text-sm font-bold text-blue-400">⚡ Sistema Otimizado</p>
             <p class="text-sm opacity-90">
-                Modelo Llama 3.2 3B carregado. Modo de raciocínio aprimorado ativado.
+                Modelo 3B ajustado para maior velocidade. Memória de curto prazo ativada (últimas 6 mensagens).
             </p>
         </div>
     </main>
