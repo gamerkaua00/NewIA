@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <title>NeuralOS v5 - Ultimate</title>
+    <title>NeuralOS v5.1 - Fixed</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
@@ -24,7 +24,6 @@
         let isOfflineMode = false;
         let recognition = null;
         
-        // Configurações do Usuário (Persistentes)
         let userConfig = {
             name: localStorage.getItem('neural_user_name') || 'Usuário',
             vibe: localStorage.getItem('neural_ai_vibe') || 'Assistente Padrão',
@@ -34,9 +33,8 @@
 
         const $ = (id) => document.getElementById(id);
 
-        // --- SISTEMA DE ÁUDIO (TTS & STT) ---
+        // --- SISTEMA DE ÁUDIO ---
         function setupAudio() {
-            // Reconhecimento de Voz (STT)
             if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 recognition = new SpeechRecognition();
@@ -61,24 +59,19 @@
             } else { $('mic-btn').style.display = 'none'; }
         }
 
-        // Fala da IA (TTS)
         function speak(text) {
             if (!userConfig.ttsEnabled || !text) return;
-            // Limpa formatação Markdown para não ler asteriscos
             const cleanText = text.replace(/[*#_\[\]]/g, '').replace(/https?:\/\/\S+/g, 'link');
             const utterance = new SpeechSynthesisUtterance(cleanText);
             utterance.lang = 'pt-BR';
-            utterance.rate = 1.1; // Um pouco mais rápido
-            utterance.pitch = 1.0;
-            window.speechSynthesis.cancel(); // Para fala anterior
+            utterance.rate = 1.1; 
+            window.speechSynthesis.cancel(); 
             window.speechSynthesis.speak(utterance);
         }
 
-        // --- GERENCIADOR DE CONFIGURAÇÕES ---
+        // --- CONFIGURAÇÕES ---
         window.toggleSettings = () => {
-            const modal = $('settings-modal');
-            modal.classList.toggle('hidden');
-            // Carrega valores atuais
+            $('settings-modal').classList.toggle('hidden');
             $('input-name').value = userConfig.name;
             $('select-vibe').value = userConfig.vibe;
             $('check-tts').checked = userConfig.ttsEnabled;
@@ -93,35 +86,67 @@
             localStorage.setItem('neural_ai_vibe', userConfig.vibe);
             localStorage.setItem('neural_tts', userConfig.ttsEnabled);
             
-            updateSystemPrompt(); // Atualiza o cérebro com a nova personalidade
+            updateSystemPrompt();
             $('settings-modal').classList.add('hidden');
             showToast("Configurações salvas!");
         };
 
-        // --- BANCO DE DADOS HÍBRIDO ---
+        // --- BANCO DE DADOS HÍBRIDO (CORRIGIDO) ---
         const DB = {
             wakeUp: async () => {
                 if (!RENDER_API_URL || isOfflineMode) return false;
+                
+                // Feedback visual de conexão
+                $('status-indicator').innerHTML = '<span class="animate-pulse">⏳ Conectando...</span>';
+                $('status-indicator').className = "text-[10px] text-yellow-600 font-bold cursor-pointer";
+
                 try {
-                    $('status-text').innerText = "Conectando nuvem...";
                     const controller = new AbortController();
-                    setTimeout(() => controller.abort(), 10000); // 10s timeout
+                    // AUMENTADO PARA 60 SEGUNDOS (Correção principal)
+                    const timeoutId = setTimeout(() => controller.abort(), 60000); 
+                    
                     const res = await fetch(`${RENDER_API_URL}/wake-up`, { signal: controller.signal });
-                    if (res.ok) { isOnlineDB = true; return true; }
-                } catch (e) { console.warn("Modo Local."); }
+                    clearTimeout(timeoutId);
+                    
+                    if (res.ok) { 
+                        isOnlineDB = true; 
+                        $('status-indicator').innerText = "● Online (Nuvem)";
+                        $('status-indicator').className = "text-[10px] text-green-500 font-bold cursor-pointer";
+                        return true; 
+                    }
+                } catch (e) { 
+                    console.warn("Falha ao conectar no Render:", e); 
+                }
+                
+                // Se falhar
+                isOnlineDB = false;
+                $('status-indicator').innerText = "● Local (Erro Conexão)";
+                $('status-indicator').className = "text-[10px] text-red-500 font-bold cursor-pointer";
                 return false;
+            },
+            
+            // Função manual para tentar reconectar
+            retryConnection: async () => {
+                showToast("Tentando reconectar ao servidor...");
+                await DB.wakeUp();
+                DB.refreshList();
             },
             
             add: async (text) => {
                 const entry = { content: text, date: new Date().toISOString() };
                 if (isOnlineDB && !isOfflineMode) {
                     try {
-                        fetch(`${RENDER_API_URL}/memories`, {
+                        await fetch(`${RENDER_API_URL}/memories`, {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify(entry)
                         });
-                    } catch(e){}
+                    } catch(e){
+                        // Fallback silencioso se cair a net no meio
+                        const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
+                        local.unshift({ ...entry, id: Date.now() });
+                        localStorage.setItem('neural_local_db', JSON.stringify(local));
+                    }
                 } else {
                     const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
                     local.unshift({ ...entry, id: Date.now() });
@@ -132,27 +157,31 @@
             },
 
             search: async (term) => {
-                // Simulação de busca local rápida para o chat
                 const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
+                // Se estiver online, tenta buscar na nuvem também (opcional, aqui mantemos local para velocidade no RAG)
                 return local.filter(m => m.content.toLowerCase().includes(term.toLowerCase()))
                             .map(m => m.content).slice(0, 3);
             },
 
             refreshList: async () => {
                 const list = $('memory-list');
-                let items = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
+                let items = [];
                 
-                // Se online, tenta pegar da nuvem também (opcional misturar)
+                // Tenta pegar da nuvem primeiro
                 if (isOnlineDB && !isOfflineMode) {
                     try {
                         const res = await fetch(`${RENDER_API_URL}/memories`);
-                        items = await res.json();
-                        $('status-indicator').innerText = "● Online (Nuvem)";
-                        $('status-indicator').className = "text-[10px] text-green-500 font-bold";
-                    } catch(e) {}
+                        if(res.ok) {
+                            items = await res.json();
+                        } else { throw new Error("Erro API"); }
+                    } catch(e) {
+                        // Se falhar, mostra local e avisa
+                        items = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
+                        $('status-indicator').innerText = "● Local (Erro Sync)";
+                        $('status-indicator').className = "text-[10px] text-red-400 font-bold cursor-pointer";
+                    }
                 } else {
-                    $('status-indicator').innerText = "● Local (Offline)";
-                    $('status-indicator').className = "text-[10px] text-yellow-500 font-bold";
+                    items = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
                 }
 
                 $('mem-count').innerText = items.length;
@@ -191,33 +220,28 @@
 
         // --- CORE ---
         function updateSystemPrompt() {
-            // Define a personalidade baseada na escolha do usuário
             let persona = "Seja útil e direta.";
-            if (userConfig.vibe === 'Jarvis') persona = "Aja como o JARVIS do Homem de Ferro. Seja extremamente técnico, polido e chame o usuário de Senhor.";
-            if (userConfig.vibe === 'Amigo') persona = "Seja super casual, use gírias leves, emojis e aja como um melhor amigo.";
+            if (userConfig.vibe === 'Jarvis') persona = "Aja como o JARVIS. Técnico, formal e chame o usuário de Senhor.";
+            if (userConfig.vibe === 'Amigo') persona = "Seja casual, melhor amigo, use gírias leves.";
             
             chatHistory[0] = { 
                 role: "system", 
                 content: `
-Você é o NeuralOS.
-USUÁRIO: ${userConfig.name}
-PERSONALIDADE: ${persona}
-
+Você é o NeuralOS. USUÁRIO: ${userConfig.name}. PERSONALIDADE: ${persona}.
 DIRETRIZES:
 1. Pense antes de responder dentro de tags <pensamento>.
-2. Se precisar de dados externos, USE AS FERRAMENTAS.
-3. Se o usuário mandar uma imagem (descrita no texto), comente sobre ela.
-
-FERRAMENTAS:
-[CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOOGLE: termo]
+2. Use FERRAMENTAS para dados externos.
+FERRAMENTAS: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOOGLE: termo]
 ` 
             };
         }
 
         async function initSystem() {
             setupAudio();
+            updateSystemPrompt(); 
+
+            // Tenta acordar o banco em paralelo com o carregamento da IA
             const wakeUpPromise = DB.wakeUp();
-            updateSystemPrompt(); // Configura prompt inicial
 
             $('status-text').innerText = "Inicializando GPU...";
             $('loading-bar').style.width = "10%";
@@ -231,7 +255,6 @@ FERRAMENTAS:
                         initProgressCallback: (report) => {
                             if(report.text.includes("Fetching")) $('status-text').innerText = "Baixando IA...";
                             else if(report.text.includes("Loading")) $('status-text').innerText = "Carregando Cérebro...";
-                            // Barra falsa para sensação de progresso
                             $('loading-bar').style.width = "70%";
                         },
                         logLevel: "WARN",
@@ -239,6 +262,8 @@ FERRAMENTAS:
                 );
 
                 await engine.chat.completions.create({ messages: [{ role: "user", content: "hi" }], max_tokens: 1 });
+                
+                // Aguarda o banco (ou timeout)
                 await wakeUpPromise;
                 DB.refreshList();
 
@@ -257,31 +282,26 @@ FERRAMENTAS:
             const text = input.value.trim();
             if (!text || !engine) return;
 
-            // UI
             appendBubble('user', text);
             input.value = '';
 
-            // Lógica de Imagem (Simulada)
             const imgInput = $('image-upload');
             let userMsg = text;
             if (imgInput.files.length > 0) {
                 const fileName = imgInput.files[0].name;
-                userMsg = `[O usuário enviou uma imagem chamada "${fileName}"]. ${text}`;
+                userMsg = `[Imagem enviada: "${fileName}"]. ${text}`;
                 appendBubble('system', `📸 Imagem "${fileName}" anexada.`);
-                imgInput.value = ''; // Limpa input
+                imgInput.value = '';
             }
 
-            // RAG Automático
             const memories = await DB.search(text);
             const context = memories.length > 0 ? `[Memória: ${memories.join(' | ')}]` : "";
             if (context) userMsg = `${context}\n${userMsg}`;
 
-            // Histórico Temp
             const tempHistory = [...chatHistory, { role: "user", content: userMsg }];
             const loadingId = showLoading();
 
             try {
-                // 1. Pensamento
                 const reply = await engine.chat.completions.create({
                     messages: tempHistory,
                     temperature: 0.3,
@@ -292,14 +312,12 @@ FERRAMENTAS:
                 let final = raw;
                 let toolResult = null;
 
-                // Extrai pensamento
                 const thoughtMatch = raw.match(/<pensamento>(.*?)<\/pensamento>/s);
                 if (thoughtMatch) {
                     appendBubble('thought', thoughtMatch[1]);
                     final = raw.replace(/<pensamento>.*?<\/pensamento>/s, "").trim();
                 }
 
-                // Processa Ferramentas
                 if (final.includes("[CLIMA:")) {
                     updateLoading(loadingId, "Satélite...");
                     const city = final.match(/\[CLIMA: (.*?)\]/)[1];
@@ -313,7 +331,7 @@ FERRAMENTAS:
                 else if (final.includes("[MEM:")) {
                     const c = final.match(/\[MEM: (.*?)\]/)[1];
                     await DB.add(c);
-                    toolResult = "Memória salva com sucesso.";
+                    toolResult = "Memória salva.";
                 }
                 else if (final.includes("[YOUTUBE:")) {
                     const t = final.match(/\[YOUTUBE: (.*?)\]/)[1];
@@ -326,7 +344,6 @@ FERRAMENTAS:
                     final = `🌐 Pesquisando: **${t}**`;
                 }
 
-                // Loop de Agente (Se houve ferramenta, responde de novo)
                 if (toolResult) {
                     tempHistory.push({ role: "assistant", content: raw });
                     tempHistory.push({ role: "user", content: `Resultado do sistema: ${toolResult}. Responda ao usuário agora.` });
@@ -336,10 +353,9 @@ FERRAMENTAS:
 
                 removeLoading(loadingId);
                 appendBubble('assistant', final);
-                speak(final); // FALA!
+                speak(final);
 
-                // Atualiza histórico real
-                chatHistory.push({ role: "user", content: text }); // Salva texto original limpo
+                chatHistory.push({ role: "user", content: text });
                 chatHistory.push({ role: "assistant", content: final });
                 if (chatHistory.length > MAX_HISTORY) chatHistory.splice(1, 2);
 
@@ -386,9 +402,8 @@ FERRAMENTAS:
         }
         function updateLoading(id, txt) { const el = document.getElementById(id+'-txt'); if(el) el.innerText = txt; }
         function removeLoading(id) { const el = document.getElementById(id); if(el) el.remove(); }
-        function showToast(msg) { /* Toast Simples */ alert(msg); } // Simplificado para economizar linhas
+        function showToast(msg) { /* Toast Simples */ alert(msg); }
 
-        // TAB SWITCH
         window.switchTab = (tab) => {
             if (tab === 'chat') {
                 $('view-chat').classList.remove('hidden');
@@ -426,11 +441,11 @@ FERRAMENTAS:
             <label class="block text-xs font-bold text-gray-500 mb-1">Seu Nome</label>
             <input id="input-name" type="text" class="w-full bg-gray-100 rounded p-2 text-sm mb-4">
             
-            <label class="block text-xs font-bold text-gray-500 mb-1">Personalidade da IA</label>
+            <label class="block text-xs font-bold text-gray-500 mb-1">Personalidade</label>
             <select id="select-vibe" class="w-full bg-gray-100 rounded p-2 text-sm mb-4">
                 <option value="Assistente Padrão">Padrão</option>
                 <option value="Jarvis">Jarvis (Técnico)</option>
-                <option value="Amigo">Melhor Amigo (Casual)</option>
+                <option value="Amigo">Melhor Amigo</option>
             </select>
             
             <div class="flex items-center justify-between mb-6">
@@ -448,7 +463,7 @@ FERRAMENTAS:
         <div class="w-20 h-20 mb-6 rounded-3xl bg-indigo-600 flex items-center justify-center shadow-xl shadow-indigo-200 animate-bounce">
             <i data-lucide="cpu" class="text-white w-10 h-10"></i>
         </div>
-        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v5</span></h2>
+        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v5.1</span></h2>
         <p id="status-text" class="text-gray-400 text-xs font-mono mb-8">Iniciando Sistemas...</p>
         <div class="w-48 h-1.5 bg-gray-100 rounded-full overflow-hidden">
             <div id="loading-bar" class="h-full bg-indigo-600 transition-all duration-300 w-0"></div>
@@ -466,7 +481,8 @@ FERRAMENTAS:
                 </button>
                 <div>
                     <h1 class="font-bold text-sm text-gray-800">NeuralOS</h1>
-                    <div id="status-indicator" class="text-[10px] text-gray-400 font-medium">● Conectando...</div>
+                    <!-- Botão de Status Clicável para Retry -->
+                    <div id="status-indicator" onclick="DB.retryConnection()" class="text-[10px] text-gray-400 font-medium cursor-pointer">● Conectando...</div>
                 </div>
             </div>
             
@@ -491,7 +507,6 @@ FERRAMENTAS:
             <!-- Input Area -->
             <div class="absolute bottom-0 w-full p-4 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent z-10">
                 <div class="flex items-center gap-2 bg-white border border-gray-200 p-1.5 pl-2 rounded-full shadow-xl">
-                    <!-- Botão Visão -->
                     <button onclick="triggerImageUpload()" class="w-9 h-9 rounded-full text-gray-400 hover:text-indigo-600 hover:bg-gray-50 flex items-center justify-center transition-colors">
                         <i data-lucide="image" class="w-5 h-5"></i>
                     </button>
@@ -499,7 +514,6 @@ FERRAMENTAS:
                     
                     <input id="input-box" type="text" class="flex-1 bg-transparent text-sm text-gray-800 focus:outline-none placeholder-gray-400" placeholder="Digite...">
                     
-                    <!-- Botão Voz -->
                     <button id="mic-btn" onclick="window.toggleMic && window.toggleMic()" class="w-9 h-9 rounded-full bg-gray-100 text-gray-500 hover:bg-red-100 hover:text-red-500 flex items-center justify-center transition-colors">
                         <i data-lucide="mic" class="w-5 h-5"></i>
                     </button>
