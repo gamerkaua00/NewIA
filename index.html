@@ -5,17 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IA Local - Projeto Neural</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Usando uma versão específica e estável do WebLLM -->
+    <!-- Atualizando para versão 0.2.60 que é mais robusta com URLs explícitas -->
     <script type="module">
-        import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.46/+esm";
+        import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.60/+esm";
 
-        // Configuração EXPLÍCITA do modelo para evitar erro de URL
-        // Estamos apontando diretamente para os binários compilados (WASM)
+        // Configuração COMPLETA para evitar ambiguidades e erros de undefined
         const myAppConfig = {
             model_list: [
                 {
                     "model_id": "Phi-3-mini-4k-instruct-q4f16_1-MLC",
+                    // Link para o arquivo WASM (o motor compilado)
                     "model_lib_url": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/phi-3-mini-4k-instruct-q4f16_1-MLC/Phi-3-mini-4k-instruct-q4f16_1-MLC-webgpu.wasm",
+                    // Link para os pesos do modelo (O Cérebro) - Faltava isso, causando o erro 'endsWith'
+                    "model_url": "https://huggingface.co/mlc-ai/Phi-3-mini-4k-instruct-q4f16_1-MLC/resolve/main/",
                     "vram_required_MB": 3000,
                     "low_resource_required": true,
                 }
@@ -31,55 +33,57 @@
 
         async function initChat() {
             $('status-text').innerText = "Inicializando motor gráfico (WebGPU)...";
-            $('error-log').classList.add('hidden'); // Esconde erros antigos
+            $('error-log').classList.add('hidden');
             
             const initProgressCallback = (report) => {
                 $('status-text').innerText = report.text;
-                // Barra de progresso baseada no texto
+                // Lógica de barra de progresso
                 if(report.text.includes("Fetching param cache")) {
-                    // Extraindo porcentagem se disponível
                     const match = report.text.match(/(\d+)%/);
                     if (match) $('loading-bar').style.width = match[1] + "%";
                 } else if (report.text.includes("Loading model")) {
-                     $('loading-bar').style.width = "90%";
+                     $('loading-bar').style.width = "95%";
+                } else if (report.text.includes("Finish")) {
+                     $('loading-bar').style.width = "100%";
                 }
             };
 
             try {
-                // Verificação de suporte WebGPU antes de tentar carregar
                 if (!navigator.gpu) {
-                    throw new Error("Seu navegador não suporta WebGPU. Tente usar Chrome ou Edge atualizados no Desktop ou Android.");
+                    throw new Error("Seu navegador não suporta WebGPU. Use Chrome (Desktop/Android) ou Edge atualizados.");
                 }
 
-                // Passamos o appConfig para garantir que ele ache os arquivos
+                console.log("Iniciando carregamento do modelo com config:", myAppConfig);
+
                 engine = await webllm.CreateMLCEngine(
                     selectedModel,
                     { 
                         appConfig: myAppConfig,
-                        initProgressCallback: initProgressCallback 
+                        initProgressCallback: initProgressCallback,
+                        logLevel: "INFO" // Ajuda a ver o que está acontecendo no console
                     }
                 );
                 
-                $('status-text').innerText = "IA Pronta!";
+                $('status-text').innerText = "IA Pronta e Carregada!";
                 $('loading-bar').style.width = "100%";
-                setTimeout(() => $('loading-container').style.display = 'none', 800);
+                setTimeout(() => $('loading-container').style.display = 'none', 1000);
                 $('send-btn').disabled = false;
                 
                 const systemPrompt = `
 Você é uma IA assistente rodando localmente.
 Responda sempre em Português do Brasil.
-Seja direta e útil.
+Seja direta, técnica e prestativa.
 
-FERRAMENTAS:
-Se precisar pesquisar: [BUSCAR: termo]
-Se precisar salvar: [SALVAR: dados]
+FERRAMENTAS DISPONÍVEIS:
+- Se precisar pesquisar algo na internet que você não sabe: Responda apenas com [BUSCAR: sua pesquisa aqui]
+- Se o usuário pedir para lembrar ou salvar algo: Responda apenas com [SALVAR: o dado aqui]
 `;
                 chatHistory.push({ role: "system", content: systemPrompt });
 
             } catch (err) {
-                $('loading-container').style.display = 'flex'; // Mantém visível em caso de erro
-                $('status-text').innerText = "Falha na inicialização.";
-                $('error-log').innerText = err.message;
+                $('loading-container').style.display = 'flex';
+                $('status-text').innerText = "Falha crítica na inicialização.";
+                $('error-log').innerText = `${err.message}\n\nVerifique o console (F12) para detalhes.`;
                 $('error-log').classList.remove('hidden');
                 console.error("Erro detalhado:", err);
             }
@@ -94,11 +98,10 @@ Se precisar salvar: [SALVAR: dados]
                 : 'bg-gray-700 text-gray-200 self-start rounded-tl-none'
             }`;
             
-            // Formatação simples de Markdown
             let formattedText = text
-                .replace(/\*\*(.*?)\*\*/g, '<b class="text-white">$1</b>') // Negrito
-                .replace(/### (.*?)\n/g, '<h3 class="text-lg font-bold mt-2">$1</h3>') // Títulos
-                .replace(/`(.*?)`/g, '<code class="bg-black/30 px-1 py-0.5 rounded text-yellow-200 font-mono text-xs">$1</code>'); // Código inline
+                .replace(/\*\*(.*?)\*\*/g, '<b class="text-white">$1</b>')
+                .replace(/### (.*?)\n/g, '<h3 class="text-lg font-bold mt-2">$1</h3>')
+                .replace(/`(.*?)`/g, '<code class="bg-black/30 px-1 py-0.5 rounded text-yellow-200 font-mono text-xs">$1</code>');
 
             div.innerHTML = formattedText;
             chatBox.appendChild(div);
@@ -130,7 +133,6 @@ Se precisar salvar: [SALVAR: dados]
                 const aiResponse = reply.choices[0].message.content;
                 $('thinking').remove();
 
-                // Lógica de Ferramentas (Simulada para teste)
                 if (aiResponse.includes("[BUSCAR:")) {
                     handleSearchTool(aiResponse);
                 } else if (aiResponse.includes("[SALVAR:")) {
@@ -142,31 +144,33 @@ Se precisar salvar: [SALVAR: dados]
 
             } catch (err) {
                 if($('thinking')) $('thinking').remove();
-                appendMessage('assistant', "Erro: " + err.message);
+                appendMessage('assistant', "Erro na geração: " + err.message);
             }
         };
 
-        // Simulação das ferramentas (Para testar o "Cérebro" antes do Backend)
         async function handleSearchTool(command) {
             const query = command.match(/\[BUSCAR: (.*?)\]/)[1];
-            appendMessage('assistant', `🔎 <i>(Modo Offline) Detectei necessidade de busca: "${query}". Quando conectarmos a API, trarei a resposta real.</i>`);
+            appendMessage('assistant', `🔎 <i>(Simulação) Pesquisando: "${query}"...</i>`);
             
-            // Simulando retorno para a IA continuar a conversa
-            chatHistory.push({ role: "system", content: `[SISTEMA]: A busca por "${query}" ainda não está conectada. Diga ao usuário que você entendeu a intenção mas precisa do módulo de internet ativado.` });
+            // Aqui fingimos que o Google respondeu para a IA continuar
+            const fakeResult = `Resultados simulados para "${query}": Esta é uma informação de teste, pois o módulo de internet real ainda será conectado.`;
+            
+            chatHistory.push({ role: "system", content: `[SISTEMA]: Resultado da busca: "${fakeResult}". Responda ao usuário com base nisso.` });
             
             const followUp = await engine.chat.completions.create({ messages: chatHistory });
             appendMessage('assistant', followUp.choices[0].message.content);
+            chatHistory.push({ role: "assistant", content: followUp.choices[0].message.content });
         }
 
         async function handleSaveTool(command) {
             const data = command.match(/\[SALVAR: (.*?)\]/)[1];
-            // Salvando no LocalStorage do navegador (temporário, para teste)
+            
             const savedItems = JSON.parse(localStorage.getItem('ia_memoria') || '[]');
             savedItems.push({ data: new Date().toISOString(), content: data });
             localStorage.setItem('ia_memoria', JSON.stringify(savedItems));
 
-            appendMessage('assistant', `💾 <i>Informação salva na memória local do navegador: "${data}"</i>`);
-            chatHistory.push({ role: "assistant", content: "Item salvo com sucesso." });
+            appendMessage('assistant', `💾 <i>Salvo na memória local: "${data}"</i>`);
+            chatHistory.push({ role: "assistant", content: `Confirmo que salvei: ${data}` });
         }
 
         $('user-input').addEventListener('keypress', (e) => {
@@ -191,7 +195,6 @@ Se precisar salvar: [SALVAR: dados]
             </div>
         </div>
         
-        <!-- Menu de Status -->
         <div class="flex gap-2 text-xs">
             <div class="px-2 py-1 bg-gray-700 rounded border border-gray-600">WebGPU: <span class="text-green-400">Ativo</span></div>
         </div>
@@ -210,24 +213,21 @@ Se precisar salvar: [SALVAR: dados]
             
             <p id="status-text" class="text-blue-300 text-sm font-mono mt-2">Iniciando download...</p>
             
-            <!-- Área de Erro (Oculta por padrão) -->
             <div id="error-log" class="hidden mt-4 p-3 bg-red-900/50 border border-red-500 rounded text-red-200 text-xs font-mono text-left overflow-auto max-h-32"></div>
 
             <p class="text-xs text-gray-500 mt-6 border-t border-gray-700 pt-4">
-                ⚠️ Este processo baixa ~2.3GB de dados do modelo Phi-3. <br>
-                Isso é feito apenas uma vez. Nas próximas, o carregamento é instantâneo.
+                ⚠️ Este processo baixa ~2.3GB de dados. <br>
+                Necessário apenas na primeira vez.
             </p>
         </div>
     </div>
 
     <!-- Área do Chat -->
     <main class="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth bg-gradient-to-b from-gray-900 to-gray-800" id="chat-box">
-        <!-- Mensagem Inicial -->
         <div class="p-4 rounded-xl bg-gray-800/80 backdrop-blur border border-gray-700 text-gray-200 self-start max-w-[85%] shadow-lg">
             <p class="mb-2">⚡ <b>Sistema Iniciado.</b></p>
             <p class="text-sm opacity-80">
-                Sou uma IA totalmente offline rodando no seu hardware via WebGPU. 
-                Nenhum dado sai deste dispositivo a menos que você use ferramentas externas.
+                Sou uma IA totalmente offline. Posso falar sobre qualquer coisa que esteja no meu treino base.
             </p>
         </div>
     </main>
