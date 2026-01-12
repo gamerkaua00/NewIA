@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <title>NeuralOS v5.1 - Fixed</title>
+    <title>NeuralOS v6 - Canvas</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
@@ -23,17 +23,39 @@
         let isOnlineDB = false;
         let isOfflineMode = false;
         let recognition = null;
+        let availableVoices = [];
         
         let userConfig = {
             name: localStorage.getItem('neural_user_name') || 'Usuário',
             vibe: localStorage.getItem('neural_ai_vibe') || 'Assistente Padrão',
             ttsEnabled: localStorage.getItem('neural_tts') === 'true',
-            autoSave: true
+            voiceIndex: parseInt(localStorage.getItem('neural_voice_idx') || '0'),
+            amoled: localStorage.getItem('neural_amoled') === 'true'
         };
 
         const $ = (id) => document.getElementById(id);
 
-        // --- SISTEMA DE ÁUDIO ---
+        // --- SISTEMA DE ÁUDIO (Vozes Múltiplas) ---
+        function loadVoices() {
+            availableVoices = window.speechSynthesis.getVoices();
+            const voiceSelect = $('select-voice');
+            voiceSelect.innerHTML = '';
+            
+            // Filtra vozes PT-BR ou usa todas se não achar
+            const ptVoices = availableVoices.filter(v => v.lang.includes('pt') || v.lang.includes('BR'));
+            const voicesToUse = ptVoices.length > 0 ? ptVoices : availableVoices;
+
+            voicesToUse.forEach((voice, index) => {
+                const option = document.createElement('option');
+                option.value = index; // Usaremos o índice relativo
+                option.textContent = `${voice.name} (${voice.lang})`;
+                // Tenta mapear o índice salvo com a lista atual
+                if(voice.name === availableVoices[userConfig.voiceIndex]?.name) option.selected = true;
+                voiceSelect.appendChild(option);
+            });
+        }
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+
         function setupAudio() {
             if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -44,13 +66,15 @@
 
                 recognition.onstart = () => {
                     $('mic-btn').classList.replace('bg-gray-100', 'bg-red-500');
-                    $('mic-btn').classList.add('text-white', 'animate-pulse');
+                    $('mic-btn').classList.replace('text-gray-500', 'text-white');
+                    $('mic-btn').classList.add('animate-pulse');
                     $('input-box').placeholder = "Ouvindo...";
                 };
                 recognition.onend = () => {
                     $('mic-btn').classList.replace('bg-red-500', 'bg-gray-100');
-                    $('mic-btn').classList.remove('text-white', 'animate-pulse');
-                    $('input-box').placeholder = "Digite ou fale...";
+                    $('mic-btn').classList.replace('text-white', 'text-gray-500');
+                    $('mic-btn').classList.remove('animate-pulse');
+                    $('input-box').placeholder = "Digite...";
                 };
                 recognition.onresult = (event) => {
                     $('input-box').value = event.results[0][0].transcript;
@@ -61,13 +85,55 @@
 
         function speak(text) {
             if (!userConfig.ttsEnabled || !text) return;
-            const cleanText = text.replace(/[*#_\[\]]/g, '').replace(/https?:\/\/\S+/g, 'link');
+            const cleanText = text.replace(/[*#_\[\]`]/g, '').replace(/https?:\/\/\S+/g, 'link');
             const utterance = new SpeechSynthesisUtterance(cleanText);
-            utterance.lang = 'pt-BR';
+            
+            // Seleciona a voz configurada
+            if (availableVoices.length > 0) {
+                // Lógica simples para pegar a voz da lista filtrada ou geral
+                const ptVoices = availableVoices.filter(v => v.lang.includes('pt') || v.lang.includes('BR'));
+                const voicesList = ptVoices.length > 0 ? ptVoices : availableVoices;
+                utterance.voice = voicesList[userConfig.voiceIndex] || availableVoices[0];
+            }
+            
             utterance.rate = 1.1; 
             window.speechSynthesis.cancel(); 
             window.speechSynthesis.speak(utterance);
         }
+
+        // --- SISTEMA CANVAS (Preview Imersivo) ---
+        window.openCanvas = (code, type) => {
+            const modal = $('canvas-modal');
+            const container = $('canvas-container');
+            const title = $('canvas-title');
+            
+            container.innerHTML = ''; // Limpa
+            title.innerText = type === 'html' ? 'Preview Web' : 'Visualizador de Código';
+            
+            if (type === 'html') {
+                const iframe = document.createElement('iframe');
+                iframe.className = "w-full h-full bg-white rounded-lg border-0";
+                container.appendChild(iframe);
+                
+                // Injeta o código no iframe
+                const doc = iframe.contentWindow.document;
+                doc.open();
+                doc.write(code);
+                doc.close();
+            } else {
+                const pre = document.createElement('pre');
+                pre.className = "w-full h-full bg-gray-900 text-green-400 p-4 overflow-auto rounded-lg font-mono text-sm";
+                pre.innerText = code;
+                container.appendChild(pre);
+            }
+            
+            modal.classList.remove('hidden');
+        };
+
+        window.closeCanvas = () => {
+            $('canvas-modal').classList.add('hidden');
+            $('canvas-container').innerHTML = ''; // Limpa memória
+        };
 
         // --- CONFIGURAÇÕES ---
         window.toggleSettings = () => {
@@ -75,122 +141,104 @@
             $('input-name').value = userConfig.name;
             $('select-vibe').value = userConfig.vibe;
             $('check-tts').checked = userConfig.ttsEnabled;
+            $('check-amoled').checked = userConfig.amoled;
+            loadVoices(); // Recarrega lista
         };
 
         window.saveSettings = () => {
             userConfig.name = $('input-name').value;
             userConfig.vibe = $('select-vibe').value;
             userConfig.ttsEnabled = $('check-tts').checked;
+            userConfig.voiceIndex = $('select-voice').selectedIndex;
+            userConfig.amoled = $('check-amoled').checked;
             
             localStorage.setItem('neural_user_name', userConfig.name);
             localStorage.setItem('neural_ai_vibe', userConfig.vibe);
             localStorage.setItem('neural_tts', userConfig.ttsEnabled);
+            localStorage.setItem('neural_voice_idx', userConfig.voiceIndex);
+            localStorage.setItem('neural_amoled', userConfig.amoled);
             
+            applyTheme();
             updateSystemPrompt();
             $('settings-modal').classList.add('hidden');
             showToast("Configurações salvas!");
         };
 
-        // --- BANCO DE DADOS HÍBRIDO (CORRIGIDO) ---
+        function applyTheme() {
+            const body = document.body;
+            const headers = document.querySelectorAll('header');
+            const inputs = document.querySelectorAll('input[type="text"], select');
+            
+            if (userConfig.amoled) {
+                body.className = "font-sans antialiased bg-black text-gray-200";
+                headers.forEach(h => h.className = h.className.replace('bg-white/90', 'bg-black/90').replace('border-gray-100', 'border-gray-800'));
+                // Ajustes gerais de cores escuras seriam feitos aqui via classes CSS globais ou substituição
+            } else {
+                body.className = "font-sans antialiased bg-slate-50 text-slate-800";
+            }
+            // Nota: Para simplificar, o CSS inline do HTML controla a maior parte das cores. 
+            // O modo AMOLED principal é o fundo preto.
+        }
+
+        // --- BANCO DE DADOS HÍBRIDO ---
         const DB = {
             wakeUp: async () => {
                 if (!RENDER_API_URL || isOfflineMode) return false;
-                
-                // Feedback visual de conexão
-                $('status-indicator').innerHTML = '<span class="animate-pulse">⏳ Conectando...</span>';
-                $('status-indicator').className = "text-[10px] text-yellow-600 font-bold cursor-pointer";
-
+                $('status-indicator').innerHTML = '<span class="animate-pulse">⏳</span>';
                 try {
                     const controller = new AbortController();
-                    // AUMENTADO PARA 60 SEGUNDOS (Correção principal)
                     const timeoutId = setTimeout(() => controller.abort(), 60000); 
-                    
                     const res = await fetch(`${RENDER_API_URL}/wake-up`, { signal: controller.signal });
                     clearTimeout(timeoutId);
-                    
                     if (res.ok) { 
                         isOnlineDB = true; 
-                        $('status-indicator').innerText = "● Online (Nuvem)";
+                        $('status-indicator').innerText = "● Online";
                         $('status-indicator').className = "text-[10px] text-green-500 font-bold cursor-pointer";
                         return true; 
                     }
-                } catch (e) { 
-                    console.warn("Falha ao conectar no Render:", e); 
-                }
-                
-                // Se falhar
+                } catch (e) {}
                 isOnlineDB = false;
-                $('status-indicator').innerText = "● Local (Erro Conexão)";
+                $('status-indicator').innerText = "● Local";
                 $('status-indicator').className = "text-[10px] text-red-500 font-bold cursor-pointer";
                 return false;
             },
-            
-            // Função manual para tentar reconectar
             retryConnection: async () => {
-                showToast("Tentando reconectar ao servidor...");
+                showToast("Reconectando...");
                 await DB.wakeUp();
                 DB.refreshList();
             },
-            
             add: async (text) => {
                 const entry = { content: text, date: new Date().toISOString() };
                 if (isOnlineDB && !isOfflineMode) {
-                    try {
-                        await fetch(`${RENDER_API_URL}/memories`, {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify(entry)
-                        });
-                    } catch(e){
-                        // Fallback silencioso se cair a net no meio
-                        const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
-                        local.unshift({ ...entry, id: Date.now() });
-                        localStorage.setItem('neural_local_db', JSON.stringify(local));
-                    }
-                } else {
-                    const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
-                    local.unshift({ ...entry, id: Date.now() });
-                    localStorage.setItem('neural_local_db', JSON.stringify(local));
-                }
-                showToast("🧠 Memória Atualizada");
+                    try { fetch(`${RENDER_API_URL}/memories`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(entry) }); } catch(e){}
+                } 
+                // Sempre salva local como backup
+                const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
+                local.unshift({ ...entry, id: Date.now() });
+                localStorage.setItem('neural_local_db', JSON.stringify(local));
+                showToast("🧠 Memória Salva");
                 DB.refreshList();
             },
-
             search: async (term) => {
                 const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
-                // Se estiver online, tenta buscar na nuvem também (opcional, aqui mantemos local para velocidade no RAG)
-                return local.filter(m => m.content.toLowerCase().includes(term.toLowerCase()))
-                            .map(m => m.content).slice(0, 3);
+                return local.filter(m => m.content.toLowerCase().includes(term.toLowerCase())).map(m => m.content).slice(0, 3);
             },
-
             refreshList: async () => {
                 const list = $('memory-list');
-                let items = [];
-                
-                // Tenta pegar da nuvem primeiro
+                let items = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
                 if (isOnlineDB && !isOfflineMode) {
                     try {
                         const res = await fetch(`${RENDER_API_URL}/memories`);
-                        if(res.ok) {
-                            items = await res.json();
-                        } else { throw new Error("Erro API"); }
-                    } catch(e) {
-                        // Se falhar, mostra local e avisa
-                        items = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
-                        $('status-indicator').innerText = "● Local (Erro Sync)";
-                        $('status-indicator').className = "text-[10px] text-red-400 font-bold cursor-pointer";
-                    }
-                } else {
-                    items = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
+                        if(res.ok) items = await res.json();
+                    } catch(e) {}
                 }
-
                 $('mem-count').innerText = items.length;
-                list.innerHTML = items.length ? '' : '<div class="text-center text-gray-400 text-xs mt-10">Vazio</div>';
-                
+                list.innerHTML = items.length ? '' : '<div class="text-center text-gray-500 text-xs mt-10">Vazio</div>';
                 items.forEach(item => {
                     const el = document.createElement('div');
-                    el.className = "bg-white p-3 rounded-lg border border-gray-100 shadow-sm mb-2 text-sm text-gray-700";
-                    el.innerHTML = `<div class="font-medium">${item.content}</div><div class="text-[10px] text-gray-400 mt-1">${new Date(item.date).toLocaleDateString()}</div>`;
+                    const bgClass = userConfig.amoled ? 'bg-gray-900 border-gray-800 text-gray-300' : 'bg-white border-gray-100 text-gray-700';
+                    el.className = `${bgClass} p-3 rounded-lg border shadow-sm mb-2 text-sm`;
+                    el.innerHTML = `<div class="font-medium">${item.content}</div><div class="text-[10px] opacity-60 mt-1">${new Date(item.date).toLocaleDateString()}</div>`;
                     list.appendChild(el);
                 });
             }
@@ -218,6 +266,40 @@
             }
         };
 
+        // --- FILE READER ---
+        window.handleFiles = async () => {
+            const input = $('file-upload');
+            const files = input.files;
+            if (files.length === 0) return;
+
+            let fileContext = "";
+            let fileCount = 0;
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                fileCount++;
+                
+                // Lê arquivos de texto/código diretamente
+                if (file.type.includes('text') || file.name.endsWith('.js') || file.name.endsWith('.html') || file.name.endsWith('.py') || file.name.endsWith('.json')) {
+                    const text = await file.text();
+                    // Limita tamanho para não estourar contexto
+                    const snippet = text.slice(0, 5000); 
+                    fileContext += `\n[ARQUIVO LIDO: ${file.name}]\nCONTEÚDO:\n${snippet}\n[FIM ARQUIVO]\n`;
+                } else {
+                    // Para binários (PDF, Vídeo), apenas notifica
+                    fileContext += `\n[ARQUIVO ANEXADO: ${file.name} (${(file.size/1024).toFixed(1)}KB)]\n`;
+                }
+            }
+
+            if (fileContext) {
+                const currentText = $('input-box').value;
+                // Injeta no input ou manda direto? Vamos apenas avisar e deixar o usuário mandar
+                showToast(`${fileCount} arquivo(s) preparado(s).`);
+                window.pendingFileContext = fileContext; // Guarda para enviar junto com a mensagem
+                $('attach-btn').classList.add('text-green-500');
+            }
+        };
+
         // --- CORE ---
         function updateSystemPrompt() {
             let persona = "Seja útil e direta.";
@@ -230,20 +312,20 @@
 Você é o NeuralOS. USUÁRIO: ${userConfig.name}. PERSONALIDADE: ${persona}.
 DIRETRIZES:
 1. Pense antes de responder dentro de tags <pensamento>.
-2. Use FERRAMENTAS para dados externos.
-FERRAMENTAS: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOOGLE: termo]
+2. Se gerar código HTML ou Javascript, envolva em blocos \`\`\`html ou \`\`\`javascript para ativar o CANVAS.
+3. Se o usuário pedir imagem, use [IMG: descrição visual].
+4. Ferramentas: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOOGLE: termo].
 ` 
             };
         }
 
         async function initSystem() {
+            applyTheme();
             setupAudio();
             updateSystemPrompt(); 
-
-            // Tenta acordar o banco em paralelo com o carregamento da IA
             const wakeUpPromise = DB.wakeUp();
 
-            $('status-text').innerText = "Inicializando GPU...";
+            $('status-text').innerText = "GPU Init...";
             $('loading-bar').style.width = "10%";
 
             try {
@@ -253,8 +335,8 @@ FERRAMENTAS: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOO
                     MODEL_ID,
                     { 
                         initProgressCallback: (report) => {
-                            if(report.text.includes("Fetching")) $('status-text').innerText = "Baixando IA...";
-                            else if(report.text.includes("Loading")) $('status-text').innerText = "Carregando Cérebro...";
+                            if(report.text.includes("Fetching")) $('status-text').innerText = "Baixando...";
+                            else if(report.text.includes("Loading")) $('status-text').innerText = "Carregando...";
                             $('loading-bar').style.width = "70%";
                         },
                         logLevel: "WARN",
@@ -262,14 +344,13 @@ FERRAMENTAS: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOO
                 );
 
                 await engine.chat.completions.create({ messages: [{ role: "user", content: "hi" }], max_tokens: 1 });
-                
-                // Aguarda o banco (ou timeout)
                 await wakeUpPromise;
                 DB.refreshList();
 
                 $('loading-screen').classList.add('opacity-0', 'pointer-events-none');
                 setTimeout(() => $('loading-screen').style.display = 'none', 500);
                 lucide.createIcons();
+                loadVoices();
 
             } catch (err) {
                 $('status-text').innerText = "Erro: " + err.message;
@@ -279,33 +360,35 @@ FERRAMENTAS: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOO
 
         window.sendMessage = async () => {
             const input = $('input-box');
-            const text = input.value.trim();
+            let text = input.value.trim();
+            
+            // Adiciona contexto de arquivos se houver
+            if (window.pendingFileContext) {
+                text = `${window.pendingFileContext}\n\n${text}`;
+                window.pendingFileContext = null;
+                $('attach-btn').classList.remove('text-green-500');
+                $('file-upload').value = '';
+            }
+
             if (!text || !engine) return;
 
-            appendBubble('user', text);
+            // Mostra apenas o texto do usuário no balão (sem o blocão do arquivo pra não poluir)
+            const displayUserText = text.length > 500 ? text.slice(text.lastIndexOf('\n')+1) + " (Com anexo)" : text;
+            appendBubble('user', displayUserText);
             input.value = '';
-
-            const imgInput = $('image-upload');
-            let userMsg = text;
-            if (imgInput.files.length > 0) {
-                const fileName = imgInput.files[0].name;
-                userMsg = `[Imagem enviada: "${fileName}"]. ${text}`;
-                appendBubble('system', `📸 Imagem "${fileName}" anexada.`);
-                imgInput.value = '';
-            }
 
             const memories = await DB.search(text);
             const context = memories.length > 0 ? `[Memória: ${memories.join(' | ')}]` : "";
-            if (context) userMsg = `${context}\n${userMsg}`;
+            if (context) text = `${context}\n${text}`;
 
-            const tempHistory = [...chatHistory, { role: "user", content: userMsg }];
+            const tempHistory = [...chatHistory, { role: "user", content: text }];
             const loadingId = showLoading();
 
             try {
                 const reply = await engine.chat.completions.create({
                     messages: tempHistory,
                     temperature: 0.3,
-                    max_tokens: 512,
+                    max_tokens: 1024,
                 });
                 
                 let raw = reply.choices[0].message.content;
@@ -318,35 +401,39 @@ FERRAMENTAS: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOO
                     final = raw.replace(/<pensamento>.*?<\/pensamento>/s, "").trim();
                 }
 
-                if (final.includes("[CLIMA:")) {
-                    updateLoading(loadingId, "Satélite...");
+                // Parser de Ferramentas
+                if (final.includes("[IMG:")) {
+                    const prompt = final.match(/\[IMG: (.*?)\]/)[1];
+                    const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`;
+                    final = final.replace(/\[IMG:.*?\]/, `🎨 Gerando Imagem...<br><img src="${imgUrl}" class="mt-2 rounded-lg w-full h-auto shadow-md" alt="${prompt}">`);
+                }
+                else if (final.includes("[CLIMA:")) {
                     const city = final.match(/\[CLIMA: (.*?)\]/)[1];
-                    toolResult = await Tools.weather(city) || "Erro no clima.";
+                    toolResult = await Tools.weather(city) || "Erro clima.";
                 }
                 else if (final.includes("[WIKI:")) {
-                    updateLoading(loadingId, "Wikipedia...");
                     const t = final.match(/\[WIKI: (.*?)\]/)[1];
                     toolResult = await Tools.wiki(t) || "Sem dados.";
                 }
                 else if (final.includes("[MEM:")) {
                     const c = final.match(/\[MEM: (.*?)\]/)[1];
                     await DB.add(c);
-                    toolResult = "Memória salva.";
+                    toolResult = "Salvo.";
                 }
                 else if (final.includes("[YOUTUBE:")) {
                     const t = final.match(/\[YOUTUBE: (.*?)\]/)[1];
                     window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(t)}`, '_blank');
-                    final = `🎬 Abrindo YouTube para: **${t}**`;
+                    final = `🎬 YouTube: **${t}**`;
                 }
                 else if (final.includes("[GOOGLE:")) {
                     const t = final.match(/\[GOOGLE: (.*?)\]/)[1];
                     window.open(`https://www.google.com/search?q=${encodeURIComponent(t)}`, '_blank');
-                    final = `🌐 Pesquisando: **${t}**`;
+                    final = `🌐 Google: **${t}**`;
                 }
 
                 if (toolResult) {
                     tempHistory.push({ role: "assistant", content: raw });
-                    tempHistory.push({ role: "user", content: `Resultado do sistema: ${toolResult}. Responda ao usuário agora.` });
+                    tempHistory.push({ role: "user", content: `Sistema: ${toolResult}. Responda.` });
                     const step2 = await engine.chat.completions.create({ messages: tempHistory });
                     final = step2.choices[0].message.content.replace(/<pensamento>.*?<\/pensamento>/s, "").trim();
                 }
@@ -369,23 +456,50 @@ FERRAMENTAS: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOO
         function appendBubble(role, text) {
             const box = $('chat-content');
             const div = document.createElement('div');
+            const dark = userConfig.amoled;
             
             if (role === 'thought') {
                 div.className = "flex w-full mb-2 animate-fade-in";
-                div.innerHTML = `<div class="bg-gray-100 text-gray-500 text-xs italic p-2 rounded-lg border-l-2 border-gray-400 max-w-[85%]">💭 ${text}</div>`;
+                div.innerHTML = `<div class="${dark ? 'bg-gray-900 text-gray-500 border-gray-700' : 'bg-gray-100 text-gray-500 border-gray-400'} text-xs italic p-2 rounded-lg border-l-2 max-w-[85%]">💭 ${text}</div>`;
             } else if (role === 'system') {
                 div.className = "flex w-full justify-center mb-2 animate-fade-in";
-                div.innerHTML = `<div class="bg-yellow-50 text-yellow-700 text-xs px-3 py-1 rounded-full border border-yellow-200">${text}</div>`;
+                div.innerHTML = `<div class="bg-yellow-500/20 text-yellow-600 text-xs px-3 py-1 rounded-full">${text}</div>`;
             } else {
                 const isUser = role === 'user';
                 div.className = `flex w-full mb-4 animate-fade-in ${isUser ? 'justify-end' : 'justify-start'}`;
+                
+                // Processa o texto para encontrar blocos de código e adicionar botão Canvas
+                let contentHTML = marked.parse(text);
+                
+                // Regex para encontrar blocos de código HTML/JS e injetar botão
+                // Isso é um truque simples de substituição de string pós-markdown
+                if (!isUser && (text.includes("```html") || text.includes("```javascript") || text.includes("```js"))) {
+                    // Extrai o código cru (simplificado)
+                    const codeMatch = text.match(/```(html|javascript|js)([\s\S]*?)```/);
+                    if (codeMatch) {
+                        const codeType = codeMatch[1] === 'html' ? 'html' : 'js';
+                        const codeContent = codeMatch[2];
+                        // Escapa para passar na função
+                        const escapedCode = codeContent.replace(/`/g, '\\`').replace(/"/g, '&quot;');
+                        
+                        contentHTML += `
+                            <button onclick="openCanvas(\`${escapedCode}\`, '${codeType}')" class="mt-2 flex items-center gap-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:shadow-lg transition-all w-full justify-center">
+                                <i data-lucide="play-circle" class="w-4 h-4"></i> Ver no Canvas
+                            </button>
+                        `;
+                    }
+                }
+
                 div.innerHTML = `
-                    <div class="max-w-[85%] p-3.5 rounded-2xl shadow-sm text-sm leading-relaxed ${
-                        isUser ? 'bg-indigo-600 text-white rounded-tr-sm' : 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm prose prose-sm'
-                    }">${isUser ? text : marked.parse(text)}</div>
+                    <div class="max-w-[90%] p-3.5 rounded-2xl shadow-sm text-sm leading-relaxed overflow-hidden ${
+                        isUser 
+                        ? 'bg-indigo-600 text-white rounded-tr-sm' 
+                        : (dark ? 'bg-gray-800 text-gray-200 border-gray-700' : 'bg-white text-gray-800 border-gray-200') + ' border rounded-tl-sm prose prose-sm prose-invert'
+                    }">${contentHTML}</div>
                 `;
             }
             box.appendChild(div);
+            lucide.createIcons();
             $('chat-box').scrollTo({ top: $('chat-box').scrollHeight, behavior: 'smooth' });
         }
 
@@ -393,18 +507,20 @@ FERRAMENTAS: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOO
             const id = 'load-' + Date.now();
             const box = $('chat-content');
             const div = document.createElement('div');
+            const dark = userConfig.amoled;
             div.id = id;
             div.className = "flex w-full mb-4 animate-fade-in";
-            div.innerHTML = `<div class="bg-white border px-3 py-2 rounded-2xl text-xs text-gray-400 flex items-center gap-2"><span class="animate-spin">⚙️</span> <span id="${id}-txt">Processando...</span></div>`;
+            div.innerHTML = `<div class="${dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} border px-3 py-2 rounded-2xl text-xs text-gray-400 flex items-center gap-2"><span class="animate-spin">⚙️</span> <span id="${id}-txt">Processando...</span></div>`;
             box.appendChild(div);
             $('chat-box').scrollTo({ top: $('chat-box').scrollHeight, behavior: 'smooth' });
             return id;
         }
         function updateLoading(id, txt) { const el = document.getElementById(id+'-txt'); if(el) el.innerText = txt; }
         function removeLoading(id) { const el = document.getElementById(id); if(el) el.remove(); }
-        function showToast(msg) { /* Toast Simples */ alert(msg); }
+        function showToast(msg) { /* Placeholder toast */ }
 
         window.switchTab = (tab) => {
+            const dark = userConfig.amoled;
             if (tab === 'chat') {
                 $('view-chat').classList.remove('hidden');
                 $('view-mem').classList.add('hidden');
@@ -419,7 +535,7 @@ FERRAMENTAS: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOO
             }
         };
 
-        window.triggerImageUpload = () => $('image-upload').click();
+        window.triggerFileUpload = () => $('file-upload').click();
         $('input-box').addEventListener('keypress', (e) => { if (e.key === 'Enter') window.sendMessage(); });
         
         window.onload = initSystem;
@@ -427,97 +543,122 @@ FERRAMENTAS: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOO
     <style>
         .animate-fade-in { animation: fadeIn 0.3s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        body { background: #f8fafc; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+        /* Scrollbar */
         ::-webkit-scrollbar { width: 0px; } 
     </style>
 </head>
-<body class="font-sans antialiased bg-slate-50 text-slate-800">
+<body class="font-sans antialiased bg-slate-50 text-slate-800 transition-colors duration-300">
 
-    <!-- MODAL CONFIGURAÇÕES -->
-    <div id="settings-modal" class="hidden absolute inset-0 z-40 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
-        <div class="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl">
-            <h2 class="text-lg font-bold mb-4">Configurações</h2>
-            
-            <label class="block text-xs font-bold text-gray-500 mb-1">Seu Nome</label>
-            <input id="input-name" type="text" class="w-full bg-gray-100 rounded p-2 text-sm mb-4">
-            
-            <label class="block text-xs font-bold text-gray-500 mb-1">Personalidade</label>
-            <select id="select-vibe" class="w-full bg-gray-100 rounded p-2 text-sm mb-4">
-                <option value="Assistente Padrão">Padrão</option>
-                <option value="Jarvis">Jarvis (Técnico)</option>
-                <option value="Amigo">Melhor Amigo</option>
-            </select>
-            
-            <div class="flex items-center justify-between mb-6">
-                <span class="text-sm font-medium">Voz (TTS)</span>
-                <input id="check-tts" type="checkbox" class="w-5 h-5 accent-indigo-600">
-            </div>
-            
-            <button onclick="saveSettings()" class="w-full bg-indigo-600 text-white py-2 rounded-xl font-bold">Salvar</button>
-            <button onclick="toggleSettings()" class="w-full mt-2 text-gray-400 text-xs">Cancelar</button>
+    <!-- CANVAS MODAL (Fullscreen Code Preview) -->
+    <div id="canvas-modal" class="hidden fixed inset-0 z-50 bg-black flex flex-col animate-fade-in">
+        <div class="h-12 bg-gray-900 flex items-center justify-between px-4 border-b border-gray-800">
+            <h3 id="canvas-title" class="text-white text-sm font-bold flex items-center gap-2">
+                <i data-lucide="layout" class="w-4 h-4 text-green-400"></i> Canvas
+            </h3>
+            <button onclick="closeCanvas()" class="text-gray-400 hover:text-white p-2">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <div id="canvas-container" class="flex-1 w-full h-full bg-white relative">
+            <!-- Iframe ou código entra aqui -->
         </div>
     </div>
 
-    <!-- LOADING INICIAL -->
+    <!-- CONFIG MODAL -->
+    <div id="settings-modal" class="hidden absolute inset-0 z-40 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl">
+            <h2 class="text-lg font-bold mb-4">Ajustes</h2>
+            
+            <label class="block text-xs font-bold text-gray-500 mb-1">Seu Nome</label>
+            <input id="input-name" type="text" class="w-full bg-gray-100 rounded p-2 text-sm mb-3">
+            
+            <label class="block text-xs font-bold text-gray-500 mb-1">Personalidade</label>
+            <select id="select-vibe" class="w-full bg-gray-100 rounded p-2 text-sm mb-3">
+                <option value="Assistente Padrão">Padrão</option>
+                <option value="Jarvis">Jarvis (Técnico)</option>
+                <option value="Amigo">Amigo (Casual)</option>
+            </select>
+
+            <label class="block text-xs font-bold text-gray-500 mb-1">Voz (TTS)</label>
+            <select id="select-voice" class="w-full bg-gray-100 rounded p-2 text-sm mb-3 text-xs">
+                <option>Carregando vozes...</option>
+            </select>
+            
+            <div class="flex items-center justify-between mb-4">
+                <span class="text-sm">Ativar Fala</span>
+                <input id="check-tts" type="checkbox" class="w-5 h-5 accent-indigo-600">
+            </div>
+
+            <div class="flex items-center justify-between mb-6">
+                <span class="text-sm">Modo AMOLED (Noite)</span>
+                <input id="check-amoled" type="checkbox" class="w-5 h-5 accent-black">
+            </div>
+            
+            <button onclick="saveSettings()" class="w-full bg-indigo-600 text-white py-2 rounded-xl font-bold">Salvar</button>
+            <button onclick="toggleSettings()" class="w-full mt-2 text-gray-400 text-xs">Fechar</button>
+        </div>
+    </div>
+
+    <!-- LOADING SCREEN -->
     <div id="loading-screen" class="absolute inset-0 z-50 bg-white flex flex-col items-center justify-center p-8 transition-opacity duration-500">
-        <div class="w-20 h-20 mb-6 rounded-3xl bg-indigo-600 flex items-center justify-center shadow-xl shadow-indigo-200 animate-bounce">
+        <div class="w-20 h-20 mb-6 rounded-3xl bg-indigo-600 flex items-center justify-center shadow-xl animate-bounce">
             <i data-lucide="cpu" class="text-white w-10 h-10"></i>
         </div>
-        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v5.1</span></h2>
-        <p id="status-text" class="text-gray-400 text-xs font-mono mb-8">Iniciando Sistemas...</p>
+        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v6</span></h2>
+        <p id="status-text" class="text-gray-400 text-xs font-mono mb-8">Iniciando...</p>
         <div class="w-48 h-1.5 bg-gray-100 rounded-full overflow-hidden">
             <div id="loading-bar" class="h-full bg-indigo-600 transition-all duration-300 w-0"></div>
         </div>
     </div>
 
-    <!-- APP -->
-    <div class="flex-1 flex flex-col relative overflow-hidden bg-white max-w-md mx-auto w-full shadow-2xl h-full border-x border-gray-100">
-        
-        <!-- HEADER -->
-        <header class="h-16 bg-white/90 backdrop-blur border-b border-gray-100 flex items-center justify-between px-4 shrink-0 z-20">
+    <!-- APP HEADER -->
+    <div class="flex-1 flex flex-col relative overflow-hidden max-w-md mx-auto w-full h-full border-x border-gray-100 shadow-2xl">
+        <header class="h-14 backdrop-blur border-b border-gray-100 flex items-center justify-between px-4 shrink-0 z-20 transition-colors" id="main-header">
             <div class="flex items-center gap-3">
-                <button onclick="toggleSettings()" class="p-2 bg-gray-50 rounded-full hover:bg-gray-100 text-gray-600">
-                    <i data-lucide="settings" class="w-5 h-5"></i>
+                <button onclick="toggleSettings()" class="p-2 rounded-full hover:bg-gray-200/50">
+                    <i data-lucide="settings" class="w-5 h-5 text-gray-600"></i>
                 </button>
                 <div>
-                    <h1 class="font-bold text-sm text-gray-800">NeuralOS</h1>
-                    <!-- Botão de Status Clicável para Retry -->
+                    <h1 class="font-bold text-sm">NeuralOS</h1>
                     <div id="status-indicator" onclick="DB.retryConnection()" class="text-[10px] text-gray-400 font-medium cursor-pointer">● Conectando...</div>
                 </div>
             </div>
             
-            <div class="flex bg-gray-50 p-1 rounded-full border border-gray-100">
+            <div class="flex bg-gray-100/50 p-1 rounded-full">
                 <button id="btn-chat" onclick="switchTab('chat')" class="px-4 py-1.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700 transition-all">Chat</button>
                 <button id="btn-mem" onclick="switchTab('mem')" class="px-4 py-1.5 rounded-full text-xs font-bold text-gray-500 hover:text-indigo-600 transition-all">Banco</button>
             </div>
         </header>
 
-        <!-- CHAT VIEW -->
-        <div id="view-chat" class="flex-1 flex flex-col relative overflow-hidden bg-slate-50">
-            <div id="chat-box" class="flex-1 overflow-y-auto pb-24 scroll-smooth">
-                <div id="chat-content" class="p-4 pt-6 space-y-4">
+        <!-- VIEW CHAT -->
+        <div id="view-chat" class="flex-1 flex flex-col relative overflow-hidden">
+            <div id="chat-box" class="flex-1 overflow-y-auto pb-24 scroll-smooth p-4">
+                <div id="chat-content" class="pt-2 space-y-4">
                     <div class="flex justify-center">
-                        <span class="text-[10px] text-gray-400 bg-white border border-gray-200 px-3 py-1 rounded-full shadow-sm flex items-center gap-1">
-                            <i data-lucide="brain" class="w-3 h-3 text-indigo-500"></i> Memória Ativa
+                        <span class="text-[10px] opacity-50 px-3 py-1 rounded-full border flex items-center gap-1">
+                            <i data-lucide="sparkles" class="w-3 h-3"></i> Pronto para criar
                         </span>
                     </div>
                 </div>
             </div>
 
-            <!-- Input Area -->
-            <div class="absolute bottom-0 w-full p-4 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent z-10">
-                <div class="flex items-center gap-2 bg-white border border-gray-200 p-1.5 pl-2 rounded-full shadow-xl">
-                    <button onclick="triggerImageUpload()" class="w-9 h-9 rounded-full text-gray-400 hover:text-indigo-600 hover:bg-gray-50 flex items-center justify-center transition-colors">
-                        <i data-lucide="image" class="w-5 h-5"></i>
+            <!-- INPUT BAR -->
+            <div class="absolute bottom-0 w-full p-4 bg-gradient-to-t from-white via-white to-transparent z-10 transition-colors" id="input-container">
+                <div class="flex items-center gap-2 border p-1.5 pl-2 rounded-full shadow-lg bg-white/90 backdrop-blur" id="input-wrapper">
+                    <!-- Botão Arquivo/Foto -->
+                    <button id="attach-btn" onclick="triggerFileUpload()" class="w-9 h-9 rounded-full text-gray-400 hover:text-indigo-600 flex items-center justify-center transition-colors">
+                        <i data-lucide="paperclip" class="w-5 h-5"></i>
                     </button>
-                    <input type="file" id="image-upload" accept="image/*" class="hidden">
+                    <input type="file" id="file-upload" multiple class="hidden" onchange="handleFiles()">
                     
-                    <input id="input-box" type="text" class="flex-1 bg-transparent text-sm text-gray-800 focus:outline-none placeholder-gray-400" placeholder="Digite...">
+                    <input id="input-box" type="text" class="flex-1 bg-transparent text-sm focus:outline-none placeholder-gray-400" placeholder="Digite, fale ou anexe...">
                     
+                    <!-- Mic -->
                     <button id="mic-btn" onclick="window.toggleMic && window.toggleMic()" class="w-9 h-9 rounded-full bg-gray-100 text-gray-500 hover:bg-red-100 hover:text-red-500 flex items-center justify-center transition-colors">
                         <i data-lucide="mic" class="w-5 h-5"></i>
                     </button>
 
+                    <!-- Send -->
                     <button onclick="window.sendMessage()" class="w-10 h-10 bg-indigo-600 hover:bg-indigo-500 rounded-full flex items-center justify-center text-white shadow-lg transition-transform active:scale-95">
                         <i data-lucide="arrow-up" class="w-5 h-5"></i>
                     </button>
@@ -525,15 +666,14 @@ FERRAMENTAS: [CLIMA: cidade], [MEM: fato], [WIKI: termo], [YOUTUBE: termo], [GOO
             </div>
         </div>
 
-        <!-- MEMORY VIEW -->
-        <div id="view-mem" class="hidden flex-1 flex flex-col bg-white overflow-hidden">
-            <div class="p-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
-                <h3 class="font-bold text-xs text-gray-500 uppercase tracking-wider">Memória (<span id="mem-count">0</span>)</h3>
-                <button onclick="DB.refreshList()" class="p-2 text-indigo-600 bg-indigo-50 rounded-full"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
+        <!-- VIEW MEMORY -->
+        <div id="view-mem" class="hidden flex-1 flex flex-col overflow-hidden">
+            <div class="p-4 border-b flex justify-between items-center">
+                <h3 class="font-bold text-xs uppercase tracking-wider opacity-70">Memória (<span id="mem-count">0</span>)</h3>
+                <button onclick="DB.refreshList()" class="p-2 rounded-full hover:bg-gray-100"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
             </div>
             <div id="memory-list" class="flex-1 overflow-y-auto p-4"></div>
         </div>
-
     </div>
 
 </body>
