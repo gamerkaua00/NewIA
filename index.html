@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>IA Mobile Pro - Poco Edition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
@@ -10,9 +10,8 @@
     <script type="module">
         import * as webllm from "https://esm.run/@mlc-ai/web-llm";
 
-        // --- CONFIGURAÇÃO ULTRA (Poco X7 Pro Edition) ---
-        // Com 12GB de RAM, podemos usar o modelo 3B confortavelmente.
-        // Ele é muito mais inteligente e criativo que o 1B.
+        // --- CONFIGURAÇÃO ---
+        // Mantemos o 3B, mas vamos extrair o máximo dele com Prompt Engineering.
         const selectedModel = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
 
         let engine = null;
@@ -21,7 +20,7 @@
         const $ = (id) => document.getElementById(id);
 
         async function initChat() {
-            $('status-text').innerText = "Detectando GPU Mobile...";
+            $('status-text').innerText = "Iniciando GPU...";
             $('error-log').classList.add('hidden');
             $('loading-bar').style.width = "10%";
             
@@ -39,10 +38,8 @@
 
             try {
                 if (!navigator.gpu) {
-                    throw new Error("Navegador sem suporte WebGPU. No Android, use o Chrome Beta ou Canary se o estável falhar, e ative flags se necessário.");
+                    throw new Error("Seu navegador não suporta WebGPU. Use Chrome atualizado.");
                 }
-
-                console.log("Iniciando Motor 3B:", selectedModel);
 
                 engine = await webllm.CreateMLCEngine(
                     selectedModel,
@@ -52,59 +49,49 @@
                     }
                 );
                 
-                // Warm-up rápido
-                $('status-text').innerText = "Otimizando para 12GB RAM...";
+                // Warm-up
                 await engine.chat.completions.create({
                     messages: [{ role: "user", content: "oi" }],
                     max_tokens: 1,
                 });
 
-                $('status-text').innerText = "Pronto!";
                 setTimeout(() => $('loading-container').style.display = 'none', 500);
                 $('send-btn').disabled = false;
                 
+                // --- PROMPT DE ALTA INTELIGÊNCIA ---
+                // Instruções explícitas para raciocínio lógico.
                 const systemPrompt = `
-Você é uma assistente pessoal avançada rodando em um dispositivo de alto desempenho.
-- Suas respostas devem ser úteis, detalhadas quando necessário, e sempre em Português.
-- Você tem mais capacidade de raciocínio agora.
+Você é uma Inteligência Artificial especialista e altamente capaz.
+SUAS DIRETRIZES:
+1. Raciocínio: Antes de responder perguntas complexas, pense passo a passo.
+2. Idioma: Responda SEMPRE em Português do Brasil de forma natural e culta.
+3. Personalidade: Seja prestativa, direta e evite respostas vagas como "não sei". Se não souber, use a ferramenta de busca.
+4. Contexto: Lembre-se que você está rodando localmente em um dispositivo potente.
 
-COMANDOS:
-- [BUSCAR: termo]
-- [SALVAR: dados]
+FERRAMENTAS:
+- Use [BUSCAR: termo] se precisar de fatos atuais.
+- Use [SALVAR: dados] para guardar informações importantes.
 `;
                 chatHistory.push({ role: "system", content: systemPrompt });
 
             } catch (err) {
                 $('loading-container').style.display = 'flex';
-                $('status-text').innerText = "Erro na inicialização.";
-                
-                $('error-log').innerHTML = `
-                    <div class="font-bold text-red-300">Erro:</div>
-                    <div class="mb-2 text-[10px]">${err.message}</div>
-                    <button onclick="window.clearCache()" class="mt-4 w-full bg-red-600 active:bg-red-800 text-white py-3 rounded-lg text-sm font-bold shadow-lg">
-                        LIMPAR CACHE E REINICIAR
-                    </button>
-                `;
+                $('status-text').innerText = "Erro.";
+                $('error-log').innerHTML = `<div class="text-[10px] text-red-300">${err.message}</div><button onclick="window.clearCache()" class="mt-2 bg-red-600 text-white px-4 py-2 rounded">Reiniciar</button>`;
                 $('error-log').classList.remove('hidden');
             }
         }
 
         window.clearCache = async () => {
-             if(confirm("Apagar modelo e baixar novamente?")) {
+             if(confirm("Reiniciar tudo?")) {
                 try {
                     const cacheKeys = await caches.keys();
-                    for (const key of cacheKeys) {
-                        if (key.includes("webllm")) await caches.delete(key);
-                    }
-                    const databases = await window.indexedDB.databases();
-                    for (const db of databases) {
-                        if (db.name && db.name.includes("webllm")) window.indexedDB.deleteDatabase(db.name);
-                    }
+                    for (const key of cacheKeys) { if (key.includes("webllm")) await caches.delete(key); }
+                    const dbs = await window.indexedDB.databases();
+                    for (const db of dbs) { if (db.name?.includes("webllm")) window.indexedDB.deleteDatabase(db.name); }
                     localStorage.clear();
                     window.location.reload();
-                } catch (e) {
-                    alert("Erro: " + e.message);
-                }
+                } catch (e) { alert(e.message); }
              }
         }
 
@@ -115,22 +102,19 @@ COMANDOS:
             if (!div) {
                 div = document.createElement('div');
                 if (id) div.id = id;
-                // Layout Mobile: Balões mais largos, fontes legíveis
-                div.className = `p-4 rounded-2xl max-w-[90%] mb-3 text-base leading-relaxed shadow-sm animate-fade-in ${
+                div.className = `p-4 rounded-2xl max-w-[90%] mb-4 text-base leading-relaxed shadow-sm animate-fade-in ${
                     role === 'user' 
                     ? 'bg-blue-600 text-white self-end ml-auto rounded-tr-none' 
-                    : 'bg-gray-800 border border-gray-700 text-gray-100 self-start rounded-tl-none prose prose-invert prose-p:my-1 prose-headings:text-blue-300 max-w-none'
+                    : 'bg-gray-800 border border-gray-700 text-gray-100 self-start rounded-tl-none prose prose-invert max-w-none'
                 }`;
                 chatBox.appendChild(div);
             }
 
-            if (role === 'assistant') {
-                div.innerHTML = marked.parse(text);
-            } else {
-                div.innerText = text;
-            }
+            if (role === 'assistant') div.innerHTML = marked.parse(text);
+            else div.innerText = text;
             
-            chatBox.scrollTop = chatBox.scrollHeight;
+            // Scroll forçado para o final
+            chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
             return div;
         }
 
@@ -139,20 +123,21 @@ COMANDOS:
             const text = input.value.trim();
             if (!text || !engine) return;
 
-            // Fecha teclado no mobile para ver a resposta (opcional)
-            // input.blur(); 
-
             appendMessage('user', text);
             input.value = '';
+            // Hack para mobile: focar novamente mantém teclado aberto, mas pode cobrir. 
+            // Vamos deixar o usuário decidir se fecha ou não.
+            
             chatHistory.push({ role: "user", content: text });
 
             const responseId = 'msg-' + Date.now();
-            appendMessage('assistant', '<span class="animate-pulse text-blue-300">Pensando...</span>', responseId);
+            appendMessage('assistant', '<span class="animate-pulse text-blue-300">Analisando...</span>', responseId);
 
             try {
                 const chunks = await engine.chat.completions.create({
                     messages: chatHistory,
-                    temperature: 0.7, // Mais criatividade para o modelo 3B
+                    temperature: 0.6, // Reduzido para maior precisão (menos alucinação)
+                    repetition_penalty: 1.1, // Evita repetição de frases
                     max_tokens: 2048,
                     stream: true
                 });
@@ -162,7 +147,6 @@ COMANDOS:
                 for await (const chunk of chunks) {
                     const content = chunk.choices[0]?.delta?.content || "";
                     fullResponse += content;
-                    
                     if (!fullResponse.includes("[BUSCAR:") && !fullResponse.includes("[SALVAR:")) {
                         appendMessage('assistant', fullResponse, responseId);
                     }
@@ -185,15 +169,15 @@ COMANDOS:
 
         async function handleSearchTool(command) {
             const query = command.match(/\[BUSCAR: (.*?)\]/)[1];
-            appendMessage('assistant', `🔎 <i>Pesquisando: "${query}"...</i>`);
+            appendMessage('assistant', `🔎 <i>Buscando dados sobre: "${query}"...</i>`);
+            // Simulação mais rápida
             setTimeout(async () => {
-                const fakeResult = `Resultado simulado: API Google pendente.`;
-                chatHistory.push({ role: "system", content: `[SISTEMA]: Resultado: "${fakeResult}".` });
+                const fakeResult = `(Simulado) Informação não encontrada na base local, mas a busca externa retornaria dados sobre ${query}.`;
+                chatHistory.push({ role: "system", content: `[RESULTADO DA BUSCA]: "${fakeResult}"` });
                 const followUp = await engine.chat.completions.create({ messages: chatHistory });
-                const finalText = followUp.choices[0].message.content;
-                appendMessage('assistant', finalText);
-                chatHistory.push({ role: "assistant", content: finalText });
-            }, 500);
+                appendMessage('assistant', followUp.choices[0].message.content);
+                chatHistory.push({ role: "assistant", content: followUp.choices[0].message.content });
+            }, 300);
         }
 
         async function handleSaveTool(command) {
@@ -201,8 +185,8 @@ COMANDOS:
             const savedItems = JSON.parse(localStorage.getItem('ia_memoria') || '[]');
             savedItems.push({ data: new Date().toISOString(), content: data });
             localStorage.setItem('ia_memoria', JSON.stringify(savedItems));
-            appendMessage('assistant', `💾 <i>Salvo.</i>`);
-            chatHistory.push({ role: "assistant", content: `Salvo.` });
+            appendMessage('assistant', `💾 <i>Memorizado.</i>`);
+            chatHistory.push({ role: "assistant", content: `Memorizado.` });
         }
 
         $('user-input').addEventListener('keypress', (e) => {
@@ -215,84 +199,88 @@ COMANDOS:
         @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
         
-        /* Ajustes Mobile Específicos */
-        html, body {
-            height: 100%;
-            height: 100dvh; /* Dynamic Viewport Height para mobile moderno */
-            overflow: hidden; /* Evita scroll na página inteira */
+        /* Correção Crítica para Mobile */
+        body { 
+            height: 100dvh; 
+            display: flex; 
+            flex-direction: column; 
+            overflow: hidden; 
+            background-color: #111827; /* bg-gray-900 */
+        }
+        
+        /* Garante que o chat ocupe o espaço e tenha scroll */
+        main {
+            flex: 1;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 100px; /* Espaço extra para o footer fixo não cobrir msg */
+        }
+
+        /* Input fixo na parte inferior */
+        footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background-color: #111827;
+            padding-bottom: env(safe-area-inset-bottom, 20px); /* Respeita a área de gestos do iPhone/Android */
+            z-index: 50;
         }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 flex flex-col font-sans">
+<body class="text-gray-100 font-sans">
 
-    <!-- Header Compacto Mobile -->
-    <header class="bg-gray-900/90 backdrop-blur-md p-3 border-b border-gray-800 flex justify-between items-center z-10 absolute top-0 w-full h-14">
+    <!-- Header Fixo -->
+    <header class="bg-gray-900/95 backdrop-blur shadow-md p-3 border-b border-gray-800 flex justify-between items-center z-50 h-14 w-full">
         <div class="flex items-center gap-3">
             <div class="relative">
                 <div class="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></div>
                 <div class="absolute inset-0 w-2.5 h-2.5 rounded-full bg-blue-500 blur-sm animate-pulse"></div>
             </div>
-            <div>
-                <h1 class="font-bold text-base tracking-wide">Neural <span class="text-blue-400">Pro</span></h1>
-            </div>
+            <h1 class="font-bold text-base tracking-wide">Neural <span class="text-blue-400">Pro</span></h1>
         </div>
-        
-        <div class="flex gap-2 text-[10px]">
-            <div class="px-2 py-1 bg-gray-800 rounded-full border border-gray-700 flex items-center gap-1 font-mono text-gray-400">
-                12GB RAM
-                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-            </div>
+        <div class="px-2 py-1 bg-gray-800 rounded border border-gray-700 text-[10px] text-gray-400 font-mono">
+            12GB RAM
         </div>
     </header>
 
-    <!-- Overlay de Carregamento Otimizado -->
-    <div id="loading-container" class="absolute inset-0 bg-gray-900 z-50 flex flex-col items-center justify-center p-6 text-center backdrop-blur-sm">
+    <!-- Loading -->
+    <div id="loading-container" class="absolute inset-0 bg-gray-900 z-[60] flex flex-col items-center justify-center p-6 text-center">
         <div class="w-full max-w-sm bg-gray-800 rounded-2xl p-6 shadow-2xl border border-gray-700 relative overflow-hidden">
             <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-purple-600 to-blue-600"></div>
-
-            <h2 class="text-xl font-bold mb-2 text-white">Carregando Modelo 3B</h2>
-            <p class="text-xs text-gray-400 mb-6">Otimizando para Poco X7 Pro...</p>
-            
-            <div class="w-full bg-gray-900 h-3 rounded-full overflow-hidden mb-2 border border-gray-600">
-                <div id="loading-bar" class="h-full bg-blue-500 transition-all duration-300 relative" style="width: 0%"></div>
+            <h2 class="text-xl font-bold mb-2 text-white">Carregando IA</h2>
+            <div class="w-full bg-gray-900 h-2 rounded-full overflow-hidden mb-2 border border-gray-600">
+                <div id="loading-bar" class="h-full bg-blue-500 transition-all duration-300" style="width: 0%"></div>
             </div>
-            
-            <p id="status-text" class="text-blue-300 text-xs font-mono mt-2 min-h-[20px]">Iniciando...</p>
-            
-            <div id="error-log" class="hidden mt-4 p-3 bg-red-900/30 border border-red-500/30 rounded text-red-200 text-left overflow-auto max-h-40 text-xs"></div>
-
-            <p class="text-[10px] text-gray-500 mt-6 pt-4 border-t border-gray-700">
-                Baixando ~2.3GB. <br>Recomendado Wi-Fi.
-            </p>
+            <p id="status-text" class="text-blue-300 text-xs font-mono mt-2">Iniciando...</p>
+            <div id="error-log" class="hidden mt-4 p-2 bg-red-900/30 rounded text-left max-h-40 overflow-auto"></div>
         </div>
     </div>
 
-    <!-- Área do Chat (Com padding para header e footer) -->
-    <main class="flex-1 overflow-y-auto p-4 pt-16 pb-2 space-y-4 scroll-smooth w-full max-w-2xl mx-auto" id="chat-box">
-        <div class="p-4 rounded-2xl bg-gray-800 border border-gray-700 text-gray-200 shadow-lg">
-            <p class="mb-1 text-sm font-bold text-blue-400">⚡ Modo Ultra Ativado</p>
-            <p class="text-sm opacity-90 leading-relaxed">
-                Estou usando o modelo <b>Llama 3.2 3B</b>. Estou mais inteligente e pronta para usar a potência do seu celular.
+    <!-- Chat -->
+    <main id="chat-box" class="p-4 space-y-4 w-full max-w-2xl mx-auto scroll-smooth">
+        <div class="p-4 rounded-2xl bg-gray-800 border border-gray-700 text-gray-200 shadow-lg mt-4">
+            <p class="mb-1 text-sm font-bold text-blue-400">⚡ Sistema Pronto</p>
+            <p class="text-sm opacity-90">
+                Modelo Llama 3.2 3B carregado. Modo de raciocínio aprimorado ativado.
             </p>
         </div>
     </main>
 
-    <!-- Input Mobile Friendly -->
-    <footer class="bg-gray-900 p-3 border-t border-gray-800 z-20 pb-safe">
-        <div class="max-w-2xl mx-auto flex gap-2 relative items-center">
+    <!-- Footer Input Fixo e Seguro -->
+    <footer class="border-t border-gray-800">
+        <div class="max-w-2xl mx-auto p-3 pb-4 flex gap-2 items-center">
             <input type="text" id="user-input" 
-                class="flex-1 bg-gray-800 text-white rounded-full px-5 py-3.5 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-inner text-base"
-                placeholder="Digite aqui..." autocomplete="off">
+                class="flex-1 bg-gray-800 text-white rounded-full px-5 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-gray-700 transition-all text-base border border-gray-700"
+                placeholder="Digite sua mensagem..." autocomplete="off">
                 
             <button onclick="window.sendMessage()" id="send-btn" disabled
-                class="bg-blue-600 active:bg-blue-700 active:scale-95 disabled:bg-gray-800 disabled:text-gray-600 text-white w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all">
+                class="bg-blue-600 active:bg-blue-700 text-white w-12 h-12 rounded-full flex items-center justify-center shadow-lg shrink-0">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
                     <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/>
                 </svg>
             </button>
         </div>
-        <!-- Espaço extra para barras de navegação do Android/iOS -->
-        <div class="h-1 w-full"></div> 
     </footer>
 
 </body>
