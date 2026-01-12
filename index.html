@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <title>NeuralOS v7 - Developer</title>
+    <title>NeuralOS v7.1 - Developer</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
@@ -184,26 +184,44 @@
             $('fix-code-btn').classList.add('hidden');
         };
 
-        // --- SISTEMA DE PDF (Real Client-Side) ---
+        // --- SISTEMA DE PDF OTIMIZADO (Sem Travamento) ---
         const Tools = {
             generatePDF: async (title, content) => {
                 try {
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF();
                     
-                    // Configuração básica
+                    const pageWidth = doc.internal.pageSize.getWidth();
+                    const pageHeight = doc.internal.pageSize.getHeight();
+                    const margin = 10;
+                    const maxTextWidth = pageWidth - (margin * 2);
+                    
+                    // Título
                     doc.setFontSize(18);
-                    doc.text(title || "Documento NeuralOS", 10, 10);
+                    doc.text(title || "Documento NeuralOS", margin, 20);
                     
+                    // Conteúdo com Paginação Automática
                     doc.setFontSize(12);
-                    // Quebra o texto para caber na página
-                    const splitText = doc.splitTextToSize(content, 180);
-                    doc.text(splitText, 10, 20);
+                    const lines = doc.splitTextToSize(content, maxTextWidth);
                     
-                    doc.save(`${title.replace(/\s+/g, '_')}.pdf`);
-                    return "PDF gerado e baixado com sucesso.";
+                    let cursorY = 30; // Posição inicial Y
+                    const lineHeight = 7;
+                    
+                    lines.forEach(line => {
+                        // Se a linha passar do final da página, cria nova página
+                        if (cursorY + lineHeight > pageHeight - margin) {
+                            doc.addPage();
+                            cursorY = 20; // Reseta Y no topo da nova página
+                        }
+                        doc.text(line, margin, cursorY);
+                        cursorY += lineHeight;
+                    });
+                    
+                    doc.save(`${(title || 'doc').replace(/\s+/g, '_')}.pdf`);
+                    return "PDF gerado com sucesso (Paginação automática).";
                 } catch (e) {
-                    return "Erro ao gerar PDF: " + e.message;
+                    console.error(e);
+                    return "Erro crítico ao gerar PDF. Tente um texto menor.";
                 }
             },
             weather: async (city) => {
@@ -235,7 +253,7 @@
             chatHistory[0] = { 
                 role: "system", 
                 content: `
-Você é o NeuralOS v7. USUÁRIO: ${userConfig.name}. PERSONALIDADE: ${persona}.
+Você é o NeuralOS v7.1. USUÁRIO: ${userConfig.name}. PERSONALIDADE: ${persona}.
 DIRETRIZES:
 1. Use tags <pensamento> para planejar.
 2. Se o usuário pedir código HTML/JS, use blocos \`\`\`html ou \`\`\`javascript para ativar o Canvas.
@@ -328,15 +346,15 @@ DIRETRIZES:
 
                 // Parser de Ferramentas
                 if (final.includes("[PDF:")) {
-                    updateLoading(loadingId, "Gerando PDF...");
+                    updateLoading(loadingId, "Gerando PDF (Paginado)...");
                     const match = final.match(/\[PDF: (.*?)\s*\|\s*([\s\S]*?)\]/);
                     if (match) {
                         const title = match[1];
                         const content = match[2];
                         toolResult = await Tools.generatePDF(title, content);
-                        final = final.replace(/\[PDF:.*?\]/s, `📄 PDF "<b>${title}</b>" gerado.`);
+                        final = final.replace(/\[PDF:.*?\]/s, `📄 PDF "<b>${title}</b>" gerado com sucesso.`);
                     } else {
-                        toolResult = "Erro formato PDF.";
+                        toolResult = "Erro formato PDF. Use [PDF: Titulo | Conteudo].";
                     }
                 }
                 else if (final.includes("[IMG:")) {
@@ -356,7 +374,7 @@ DIRETRIZES:
                 else if (final.includes("[MEM:")) {
                     const c = final.match(/\[MEM: (.*?)\]/)[1];
                     await DB.add(c);
-                    toolResult = "Memória salva.";
+                    toolResult = "Memória salva com sucesso.";
                 }
                 else if (final.includes("[YOUTUBE:")) {
                     const t = final.match(/\[YOUTUBE: (.*?)\]/)[1];
@@ -425,7 +443,9 @@ DIRETRIZES:
                 const local = JSON.parse(localStorage.getItem('neural_local_db') || '[]');
                 local.unshift({ ...entry, id: Date.now() });
                 localStorage.setItem('neural_local_db', JSON.stringify(local));
-                showToast("🧠 Salvo.");
+                // Feedback visual mais claro
+                const localMsg = isOnlineDB ? "Salvo na Nuvem (+Backup Local)" : "Salvo Localmente (Sem Conexão)";
+                showToast(`💾 ${localMsg}`);
                 DB.refreshList();
             },
             search: async (term) => {
@@ -452,16 +472,6 @@ DIRETRIZES:
                     el.innerHTML = `<div class="font-medium">${item.content}</div><div class="text-[10px] opacity-60 mt-1">${new Date(item.date).toLocaleDateString()}</div>`;
                     list.appendChild(el);
                 });
-            },
-            // Função de Backup
-            exportBackup: () => {
-                const data = localStorage.getItem('neural_local_db') || '[]';
-                const blob = new Blob([data], {type: "application/json"});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `neural_backup_${new Date().toLocaleDateString().replace(/\//g,'-')}.json`;
-                a.click();
             }
         };
 
@@ -615,7 +625,7 @@ DIRETRIZES:
         <div class="w-20 h-20 mb-6 rounded-3xl bg-indigo-600 flex items-center justify-center shadow-xl animate-bounce">
             <i data-lucide="cpu" class="text-white w-10 h-10"></i>
         </div>
-        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v7</span></h2>
+        <h2 class="text-2xl font-bold text-gray-800 mb-1">NeuralOS <span class="text-indigo-600">v7.1</span></h2>
         <p id="status-text" class="text-gray-400 text-xs font-mono mb-8">Iniciando...</p>
         <div class="w-48 h-1.5 bg-gray-100 rounded-full overflow-hidden">
             <div id="loading-bar" class="h-full bg-indigo-600 transition-all duration-300 w-0"></div>
@@ -665,7 +675,6 @@ DIRETRIZES:
             <div class="p-4 border-b flex justify-between items-center shrink-0">
                 <h3 class="font-bold text-xs uppercase tracking-wider opacity-70">Memória (<span id="mem-count">0</span>)</h3>
                 <div class="flex gap-2">
-                    <button onclick="DB.exportBackup()" class="p-2 rounded-full bg-green-50 text-green-600 hover:bg-green-100" title="Baixar Backup"><i data-lucide="download" class="w-4 h-4"></i></button>
                     <button onclick="DB.refreshList()" class="p-2 rounded-full hover:bg-gray-100"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
                 </div>
             </div>
