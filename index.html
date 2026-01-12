@@ -3,34 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <title>IA Mobile Pro - Poco Edition</title>
+    <title>IA Mobile Pro - Ultimate</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
     
     <script type="module">
         import * as webllm from "https://esm.run/@mlc-ai/web-llm";
 
-        // --- CONFIGURAÇÃO ---
-        // Llama 3.2 3B: O equilíbrio entre inteligência e, agora com ajustes, performance.
+        // --- CONFIGURAÇÃO DE ALTO DESEMPENHO ---
+        // Modelo 3B Instruct: O melhor equilíbrio para mobile potente (12GB RAM).
         const selectedModel = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
 
         let engine = null;
         let chatHistory = [];
-        const MAX_HISTORY = 6; // OTIMIZAÇÃO: Mantém apenas as últimas 6 trocas para evitar lentidão
+        // Aumentado para 15: Seu celular aguenta mais contexto, o que melhora a inteligência na conversa longa.
+        const MAX_HISTORY = 15; 
 
         const $ = (id) => document.getElementById(id);
 
         async function initChat() {
-            $('status-text').innerText = "Iniciando GPU...";
-            $('error-log').classList.add('hidden');
+            $('status-text').innerText = "Inicializando Neural Engine...";
             $('loading-bar').style.width = "10%";
             
             const initProgressCallback = (report) => {
                 $('status-text').innerText = report.text;
-                if(report.text.includes("Fetching param cache")) {
+                if(report.text.includes("Fetching")) {
                     const match = report.text.match(/(\d+)%/);
                     if (match) $('loading-bar').style.width = match[1] + "%";
-                } else if (report.text.includes("Loading model")) {
+                } else if (report.text.includes("Loading")) {
                      $('loading-bar').style.width = "85%";
                 } else if (report.text.includes("Finish")) {
                      $('loading-bar').style.width = "100%";
@@ -38,62 +38,54 @@
             };
 
             try {
-                if (!navigator.gpu) {
-                    throw new Error("Seu navegador não suporta WebGPU. Use Chrome atualizado.");
-                }
+                if (!navigator.gpu) throw new Error("WebGPU não detectado.");
 
                 engine = await webllm.CreateMLCEngine(
                     selectedModel,
                     { 
                         initProgressCallback: initProgressCallback,
-                        logLevel: "WARN" // Menos logs para economizar processamento
+                        logLevel: "WARN" 
                     }
                 );
                 
-                // Warm-up (Aquecimento rápido)
+                // Aquecimento silencioso para evitar lag na primeira mensagem
                 await engine.chat.completions.create({
-                    messages: [{ role: "user", content: "oi" }],
+                    messages: [{ role: "user", content: "hi" }],
                     max_tokens: 1,
                 });
 
-                setTimeout(() => $('loading-container').style.display = 'none', 500);
+                setTimeout(() => $('loading-container').style.opacity = '0', 500);
+                setTimeout(() => $('loading-container').style.display = 'none', 1000);
                 $('send-btn').disabled = false;
                 
-                // --- PROMPT OTIMIZADO ---
-                // Mais direto para evitar que a IA pense demais antes de começar a escrever
+                // --- PROMPT "ESPECIALISTA" ---
                 const systemPrompt = `
-Você é uma IA assistente especialista.
-DIRETRIZES:
-1. Responda em Português do Brasil.
-2. Seja direta e prestativa.
-3. Não divague desnecessariamente.
+Você é uma Inteligência Artificial Avançada.
+- Seu objetivo é fornecer respostas precisas, completas e inteligentes.
+- Responda SEMPRE em Português do Brasil.
+- Use formatação (negrito, listas) para facilitar a leitura.
+- Se a pergunta for complexa, explique o raciocínio.
 
 FERRAMENTAS:
-- [BUSCAR: termo]
-- [SALVAR: dados]
+- [BUSCAR: termo] para fatos da internet.
+- [SALVAR: dados] para memória de longo prazo.
 `;
-                // Inicializa histórico apenas com o System Prompt
                 chatHistory = [{ role: "system", content: systemPrompt }];
 
             } catch (err) {
-                $('loading-container').style.display = 'flex';
-                $('status-text').innerText = "Erro.";
-                $('error-log').innerHTML = `<div class="text-[10px] text-red-300">${err.message}</div><button onclick="window.clearCache()" class="mt-2 bg-red-600 text-white px-4 py-2 rounded">Reiniciar</button>`;
-                $('error-log').classList.remove('hidden');
+                $('loading-bar').classList.remove('bg-blue-500');
+                $('loading-bar').classList.add('bg-red-500');
+                $('status-text').innerText = "Erro: " + err.message;
+                $('status-text').classList.add('text-red-400');
             }
         }
 
-        window.clearCache = async () => {
-             if(confirm("Reiniciar tudo?")) {
-                try {
-                    const cacheKeys = await caches.keys();
-                    for (const key of cacheKeys) { if (key.includes("webllm")) await caches.delete(key); }
-                    const dbs = await window.indexedDB.databases();
-                    for (const db of dbs) { if (db.name?.includes("webllm")) window.indexedDB.deleteDatabase(db.name); }
-                    localStorage.clear();
-                    window.location.reload();
-                } catch (e) { alert(e.message); }
-             }
+        // Função para gerenciar histórico (Memória Deslizante)
+        function manageHistory(newRole, newContent) {
+            chatHistory.push({ role: newRole, content: newContent });
+            if (chatHistory.length > MAX_HISTORY + 1) {
+                chatHistory.splice(1, 1); // Remove a mais antiga, mantém o System Prompt
+            }
         }
 
         function appendMessage(role, text, id = null) {
@@ -103,30 +95,34 @@ FERRAMENTAS:
             if (!div) {
                 div = document.createElement('div');
                 if (id) div.id = id;
-                div.className = `p-4 rounded-2xl max-w-[90%] mb-4 text-base leading-relaxed shadow-sm animate-fade-in ${
-                    role === 'user' 
-                    ? 'bg-blue-600 text-white self-end ml-auto rounded-tr-none' 
-                    : 'bg-gray-800 border border-gray-700 text-gray-100 self-start rounded-tl-none prose prose-invert max-w-none'
+                // Layout Moderno estilo App de Mensagem
+                const isUser = role === 'user';
+                div.className = `flex w-full mb-4 ${isUser ? 'justify-end' : 'justify-start'} animate-fade-in`;
+                
+                const bubble = document.createElement('div');
+                bubble.className = `max-w-[85%] p-4 rounded-2xl shadow-sm text-[15px] leading-relaxed ${
+                    isUser 
+                    ? 'bg-blue-600 text-white rounded-tr-sm' 
+                    : 'bg-[#1f2937] text-gray-100 border border-gray-700 rounded-tl-sm prose prose-invert max-w-none'
                 }`;
+                
+                div.appendChild(bubble);
                 chatBox.appendChild(div);
+                
+                // Salva referência do bubble para inserir HTML depois
+                div.bubbleContent = bubble; 
             }
 
-            if (role === 'assistant') div.innerHTML = marked.parse(text);
-            else div.innerText = text;
+            // Renderiza Markdown ou Texto
+            if (role === 'assistant') {
+                div.bubbleContent.innerHTML = marked.parse(text);
+            } else {
+                div.bubbleContent.innerText = text;
+            }
             
+            // Scroll suave para o fim
             chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
             return div;
-        }
-
-        // Função para gerenciar o tamanho da memória e evitar lentidão
-        function manageHistory(newRole, newContent) {
-            chatHistory.push({ role: newRole, content: newContent });
-            
-            // Mantém sempre o System Prompt (índice 0) + as últimas MAX_HISTORY mensagens
-            if (chatHistory.length > MAX_HISTORY + 1) {
-                // Remove a mensagem mais antiga (pula o índice 0 que é o system)
-                chatHistory.splice(1, 1);
-            }
         }
 
         window.sendMessage = async () => {
@@ -134,67 +130,86 @@ FERRAMENTAS:
             const text = input.value.trim();
             if (!text || !engine) return;
 
+            // 1. Mostra mensagem do usuário
             appendMessage('user', text);
             input.value = '';
-            
-            // Adiciona ao histórico com gerenciamento de tamanho
             manageHistory("user", text);
 
-            const responseId = 'msg-' + Date.now();
-            // Indicador visual mais claro de processamento
-            appendMessage('assistant', '<span class="flex items-center gap-2 text-blue-300"><span class="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></span> Gerando...</span>', responseId);
+            // 2. Mostra indicador de "Processando"
+            const loadingId = 'loading-' + Date.now();
+            const chatBox = $('chat-box');
+            const loadingDiv = document.createElement('div');
+            loadingDiv.id = loadingId;
+            loadingDiv.className = 'flex w-full mb-4 justify-start animate-fade-in';
+            loadingDiv.innerHTML = `
+                <div class="bg-[#1f2937] border border-gray-700 p-4 rounded-2xl rounded-tl-sm flex items-center gap-3">
+                    <div class="flex gap-1">
+                        <span class="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></span>
+                        <span class="w-2 h-2 bg-blue-500 rounded-full animate-bounce delay-100"></span>
+                        <span class="w-2 h-2 bg-blue-500 rounded-full animate-bounce delay-200"></span>
+                    </div>
+                    <span class="text-xs text-gray-400 font-mono">Gerando resposta completa...</span>
+                </div>
+            `;
+            chatBox.appendChild(loadingDiv);
+            chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
 
             try {
-                // OTIMIZAÇÃO: Removido repetition_penalty e temperature ajustada
-                const chunks = await engine.chat.completions.create({
+                // 3. GERAÇÃO SEM STREAMING (INSTANTÂNEA AO FINAL)
+                // stream: false faz a IA processar tudo internamente e devolver só quando estiver pronto.
+                // Isso elimina a sensação de "travamento" letra por letra.
+                const reply = await engine.chat.completions.create({
                     messages: chatHistory,
-                    temperature: 0.7, 
-                    max_tokens: 1024, // Limite seguro para evitar loops infinitos
-                    stream: true
+                    temperature: 0.7,
+                    max_tokens: 2048,
+                    stream: false // <--- O SEGREDO DA FLUIDEZ
                 });
 
-                let fullResponse = "";
-                
-                for await (const chunk of chunks) {
-                    const content = chunk.choices[0]?.delta?.content || "";
-                    fullResponse += content;
-                    
-                    // Atualiza a tela a cada chunk para sensação de velocidade
-                    if (!fullResponse.includes("[BUSCAR:") && !fullResponse.includes("[SALVAR:")) {
-                        appendMessage('assistant', fullResponse, responseId);
-                    }
-                }
+                const fullResponse = reply.choices[0].message.content;
 
+                // 4. Remove indicador de loading e mostra resposta
+                loadingDiv.remove();
+
+                // Verifica ferramentas
                 if (fullResponse.includes("[BUSCAR:")) {
-                     document.getElementById(responseId).remove();
                      handleSearchTool(fullResponse);
                 } else if (fullResponse.includes("[SALVAR:")) {
-                     document.getElementById(responseId).remove();
                      handleSaveTool(fullResponse);
                 } else {
-                    // Adiciona resposta final ao histórico
+                    appendMessage('assistant', fullResponse);
                     manageHistory("assistant", fullResponse);
                 }
 
             } catch (err) {
-                appendMessage('assistant', "Erro: " + err.message);
+                loadingDiv.remove();
+                appendMessage('assistant', "Erro no processamento: " + err.message);
             }
         };
 
+        // --- Ferramentas ---
         async function handleSearchTool(command) {
             const query = command.match(/\[BUSCAR: (.*?)\]/)[1];
-            appendMessage('assistant', `🔎 <i>Buscando dados sobre: "${query}"...</i>`);
+            // Mostra um indicador de "sistema" temporário
+            const sysId = 'sys-' + Date.now();
+            appendMessage('assistant', `🔎 <i>Buscando informações sobre: <b>${query}</b>...</i>`, sysId);
+            
             setTimeout(async () => {
-                const fakeResult = `(Simulado) Dados encontrados sobre ${query}.`;
-                // Adiciona resultado como sistema, mas sem estourar o histórico
-                manageHistory("system", `[RESULTADO]: "${fakeResult}"`);
+                const fakeResult = `(Simulado) Encontrei informações relevantes sobre ${query}. (Aqui entraria o resumo do Google).`;
                 
-                const followUp = await engine.chat.completions.create({ messages: chatHistory });
+                // Remove a mensagem de "Buscando..." para limpar a tela ou mantém como log
+                // Vamos manter e adicionar a resposta abaixo
+                manageHistory("system", `[RESULTADO BUSCA]: "${fakeResult}"`);
+                
+                // Pede para a IA responder com base na busca
+                const followUp = await engine.chat.completions.create({ 
+                    messages: chatHistory, 
+                    stream: false 
+                });
                 const finalText = followUp.choices[0].message.content;
                 
                 appendMessage('assistant', finalText);
                 manageHistory("assistant", finalText);
-            }, 300);
+            }, 800);
         }
 
         async function handleSaveTool(command) {
@@ -202,8 +217,9 @@ FERRAMENTAS:
             const savedItems = JSON.parse(localStorage.getItem('ia_memoria') || '[]');
             savedItems.push({ data: new Date().toISOString(), content: data });
             localStorage.setItem('ia_memoria', JSON.stringify(savedItems));
-            appendMessage('assistant', `💾 <i>Memorizado.</i>`);
-            manageHistory("assistant", "Informação salva com sucesso.");
+            
+            appendMessage('assistant', `✅ Informação salva na memória.`);
+            manageHistory("assistant", "Confirmo que salvei a informação.");
         }
 
         $('user-input').addEventListener('keypress', (e) => {
@@ -213,87 +229,103 @@ FERRAMENTAS:
         window.onload = initChat;
     </script>
     <style>
-        @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .animate-fade-in { animation: fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-        
-        body { 
-            height: 100dvh; 
-            display: flex; 
-            flex-direction: column; 
-            overflow: hidden; 
-            background-color: #111827;
+        /* Animações e Utilitários */
+        @keyframes fade-in { 
+            from { opacity: 0; transform: translateY(10px); } 
+            to { opacity: 1; transform: translateY(0); } 
         }
+        .animate-fade-in { animation: fade-in 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) both; }
         
-        main {
-            flex: 1;
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-            padding-bottom: 100px; 
-        }
+        .delay-100 { animation-delay: 0.1s; }
+        .delay-200 { animation-delay: 0.2s; }
 
-        footer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            background-color: #111827;
-            padding-bottom: env(safe-area-inset-bottom, 20px);
-            z-index: 50;
+        /* Estilização Markdown */
+        .prose strong { color: #fff; font-weight: 600; }
+        .prose ul { padding-left: 1.2em; list-style-type: disc; margin: 0.5em 0; }
+        .prose li { margin-bottom: 0.2em; }
+        .prose p { margin-bottom: 0.8em; }
+        .prose p:last-child { margin-bottom: 0; }
+        .prose h1, .prose h2, .prose h3 { color: #93c5fd; font-weight: bold; margin-top: 1em; margin-bottom: 0.5em; }
+        
+        /* Layout Mobile Fullscreen */
+        body { 
+            background-color: #111827; 
+            background-image: radial-gradient(circle at 50% 0%, #1f2937 0%, #111827 50%);
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
     </style>
 </head>
-<body class="text-gray-100 font-sans">
+<body class="text-gray-100 font-sans antialiased selection:bg-blue-500 selection:text-white">
 
-    <!-- Header Fixo -->
-    <header class="bg-gray-900/95 backdrop-blur shadow-md p-3 border-b border-gray-800 flex justify-between items-center z-50 h-14 w-full">
+    <!-- Header Fixo Moderno -->
+    <header class="bg-[#111827]/80 backdrop-blur-xl border-b border-gray-800 z-50 h-16 shrink-0 flex items-center justify-between px-4 absolute top-0 w-full">
         <div class="flex items-center gap-3">
-            <div class="relative">
-                <div class="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></div>
-                <div class="absolute inset-0 w-2.5 h-2.5 rounded-full bg-blue-500 blur-sm animate-pulse"></div>
+            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-900/20">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="white" viewBox="0 0 16 16">
+                    <path d="M6 12.796V3.204L11.481 8 6 12.796zm.659.753 5.48-4.796a1 1 0 0 0 0-1.506L6.66 2.451C6.011 1.885 5 2.345 5 3.204v9.592a1 1 0 0 0 1.659.753z"/>
+                </svg>
             </div>
-            <h1 class="font-bold text-base tracking-wide">Neural <span class="text-blue-400">Pro</span></h1>
+            <div>
+                <h1 class="font-bold text-lg tracking-tight text-white">Neural<span class="text-blue-500">Mind</span></h1>
+                <p class="text-[10px] text-gray-400 font-medium uppercase tracking-wider">Ultimate 3B • 12GB RAM</p>
+            </div>
         </div>
-        <div class="px-2 py-1 bg-gray-800 rounded border border-gray-700 text-[10px] text-gray-400 font-mono">
-            3B Otimizado
-        </div>
+        
+        <!-- Botão de Config/Limpeza -->
+        <button onclick="if(confirm('Limpar toda memória da IA e cache?')) window.localStorage.clear() || window.location.reload()" class="p-2 text-gray-400 hover:text-white transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
+                <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
+            </svg>
+        </button>
     </header>
 
-    <!-- Loading -->
-    <div id="loading-container" class="absolute inset-0 bg-gray-900 z-[60] flex flex-col items-center justify-center p-6 text-center">
-        <div class="w-full max-w-sm bg-gray-800 rounded-2xl p-6 shadow-2xl border border-gray-700 relative overflow-hidden">
-            <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-purple-600 to-blue-600"></div>
-            <h2 class="text-xl font-bold mb-2 text-white">Carregando IA</h2>
-            <div class="w-full bg-gray-900 h-2 rounded-full overflow-hidden mb-2 border border-gray-600">
-                <div id="loading-bar" class="h-full bg-blue-500 transition-all duration-300" style="width: 0%"></div>
-            </div>
-            <p id="status-text" class="text-blue-300 text-xs font-mono mt-2">Iniciando...</p>
-            <div id="error-log" class="hidden mt-4 p-2 bg-red-900/30 rounded text-left max-h-40 overflow-auto"></div>
+    <!-- Overlay de Loading (Só aparece no início) -->
+    <div id="loading-container" class="absolute inset-0 bg-[#111827] z-[60] flex flex-col items-center justify-center p-8 transition-opacity duration-700">
+        <div class="w-20 h-20 mb-6 rounded-full bg-blue-500/10 flex items-center justify-center relative">
+            <div class="absolute inset-0 border-4 border-blue-500/30 rounded-full animate-spin"></div>
+            <div class="absolute inset-0 border-t-4 border-blue-500 rounded-full animate-spin"></div>
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="#60a5fa" viewBox="0 0 16 16">
+                <path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5l2.404.961L10.404 2l-2.218-.887zm3.564 1.426L5.596 5 8 5.961 14.154 3.5l-2.404-.961zm3.25 1.7-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923l6.5 2.6zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.662a1 1 0 0 1-.629.928l-7.185 2.874a.5.5 0 0 1-.372 0L.63 13.09a1 1 0 0 1-.63-.928V3.5a.5.5 0 0 1 .314-.464L7.443.184z"/>
+            </svg>
+        </div>
+        <h2 class="text-2xl font-bold text-white mb-2">Carregando IA</h2>
+        <p id="status-text" class="text-blue-300/80 text-sm font-mono mb-6">Preparando motores...</p>
+        
+        <div class="w-full max-w-[200px] h-1.5 bg-gray-800 rounded-full overflow-hidden">
+            <div id="loading-bar" class="h-full bg-blue-500 transition-all duration-300" style="width: 0%"></div>
         </div>
     </div>
 
-    <!-- Chat -->
-    <main id="chat-box" class="p-4 space-y-4 w-full max-w-2xl mx-auto scroll-smooth">
-        <div class="p-4 rounded-2xl bg-gray-800 border border-gray-700 text-gray-200 shadow-lg mt-4">
-            <p class="mb-1 text-sm font-bold text-blue-400">⚡ Sistema Otimizado</p>
-            <p class="text-sm opacity-90">
-                Modelo 3B ajustado para maior velocidade. Memória de curto prazo ativada (últimas 6 mensagens).
-            </p>
+    <!-- Área de Chat -->
+    <main id="chat-box" class="flex-1 overflow-y-auto px-4 pt-20 pb-28 w-full max-w-3xl mx-auto scroll-smooth">
+        <!-- Mensagem de Boas Vindas Discreta -->
+        <div class="flex justify-center mb-6 mt-4">
+            <span class="bg-blue-900/20 text-blue-300 text-xs py-1 px-3 rounded-full border border-blue-500/20 font-medium">
+                Memória Expandida Ativa • Llama 3.2 3B
+            </span>
         </div>
     </main>
 
-    <!-- Footer Input Fixo e Seguro -->
-    <footer class="border-t border-gray-800">
-        <div class="max-w-2xl mx-auto p-3 pb-4 flex gap-2 items-center">
-            <input type="text" id="user-input" 
-                class="flex-1 bg-gray-800 text-white rounded-full px-5 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-gray-700 transition-all text-base border border-gray-700"
-                placeholder="Digite sua mensagem..." autocomplete="off">
+    <!-- Área de Input Flutuante -->
+    <footer class="fixed bottom-0 left-0 w-full p-4 z-50 bg-gradient-to-t from-[#111827] via-[#111827] to-transparent pb-[env(safe-area-inset-bottom,20px)]">
+        <div class="max-w-3xl mx-auto relative">
+            <div class="absolute inset-0 bg-blue-500/5 blur-xl rounded-full"></div>
+            <div class="relative flex items-end gap-2 bg-[#1f2937] border border-gray-700 p-2 rounded-[24px] shadow-2xl">
+                <input type="text" id="user-input" 
+                    class="w-full bg-transparent text-white px-4 py-3 max-h-32 focus:outline-none placeholder-gray-500 text-[16px]"
+                    placeholder="Digite sua mensagem..." autocomplete="off">
                 
-            <button onclick="window.sendMessage()" id="send-btn" disabled
-                class="bg-blue-600 active:bg-blue-700 text-white w-12 h-12 rounded-full flex items-center justify-center shadow-lg shrink-0">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
-                    <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/>
-                </svg>
-            </button>
+                <button onclick="window.sendMessage()" id="send-btn" disabled
+                    class="bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white w-12 h-12 rounded-full flex items-center justify-center transition-all shadow-lg shrink-0 mb-px mr-px">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16" class="ml-0.5">
+                        <path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/>
+                    </svg>
+                </button>
+            </div>
         </div>
     </footer>
 
