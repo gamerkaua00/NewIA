@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <title>NeuralOS v7.7.1 - Auto Update</title>
+    <title>NeuralOS v7.8 - Stable Fix</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
@@ -12,13 +12,27 @@
     <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
     
     <script type="module">
-        // CORREÇÃO: Removido @0.2.72 para pegar sempre a última versão compatível (+esm)
-        import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm/+esm";
+        // Usamos uma versão fixa e estável, mas definiremos a config manualmente abaixo
+        import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.72/+esm";
 
         // --- CONFIGURAÇÃO ---
         const RENDER_API_URL = "https://neural-api-3vra.onrender.com"; 
         const MODEL_ID = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
         const MAX_HISTORY = 6; 
+
+        // --- CONFIGURAÇÃO MANUAL DO MODELO (CORREÇÃO DO ERRO 'FIND') ---
+        // Isso impede que a biblioteca tente buscar em uma lista vazia ou indefinida
+        const appConfig = {
+            model_list: [
+                {
+                    "model_id": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+                    "model_lib_url": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-build/Llama-3.2-3B-Instruct-q4f16_1-MLC/Llama-3.2-3B-Instruct-q4f16_1-MLC-webgpu.wasm",
+                    "vram_required_MB": 3000,
+                    "low_resource_required": true,
+                }
+            ],
+            useIndexedDBCache: true // Cache forçado aqui
+        };
 
         // --- ESTADO GLOBAL ---
         let engine = null;
@@ -39,14 +53,11 @@
 
         function loadConfigs() {
             try {
-                // Carrega apenas preferências pessoais do LocalStorage
                 if(localStorage.getItem('neural_user_name')) userConfig.name = localStorage.getItem('neural_user_name');
                 if(localStorage.getItem('neural_ai_vibe')) userConfig.vibe = localStorage.getItem('neural_ai_vibe');
                 if(localStorage.getItem('neural_tts')) userConfig.ttsEnabled = localStorage.getItem('neural_tts') === 'true';
                 if(localStorage.getItem('neural_voice_idx')) userConfig.voiceIndex = parseInt(localStorage.getItem('neural_voice_idx'));
                 if(localStorage.getItem('neural_amoled')) userConfig.amoled = localStorage.getItem('neural_amoled') === 'true';
-                
-                // Limpeza de legado: remove banco local antigo se existir, pois agora é tudo na nuvem
                 if(localStorage.getItem('neural_local_db')) localStorage.removeItem('neural_local_db');
             } catch(e) {
                 console.warn("Erro config:", e);
@@ -95,10 +106,8 @@
 
         // --- BANCO DE DADOS (RENDER APENAS) ---
         const DB = {
-            // Cache para evitar requisições lentas a cada letra digitada
             cache: [],
             lastFetch: 0,
-
             wakeUp: async () => {
                 if (!RENDER_API_URL) return false;
                 $('status-indicator').innerHTML = '<span class="animate-pulse">⏳</span>';
@@ -119,20 +128,15 @@
                 $('status-indicator').className = "text-[10px] text-red-500 font-bold cursor-pointer";
                 return false;
             },
-
             retryConnection: async () => {
                 showToast("Conectando à Nuvem...");
                 await DB.wakeUp();
                 DB.refreshList();
             },
-
-            // Sincroniza dados da nuvem (Cache de 60s)
             sync: async () => {
                 if (!isOnlineDB) return [];
                 const now = Date.now();
-                // Se o cache tem menos de 1 minuto, usa ele
                 if (now - DB.lastFetch < 60000 && DB.cache.length > 0) return DB.cache;
-
                 try {
                     const res = await fetch(`${RENDER_API_URL}/memories`);
                     if (res.ok) {
@@ -143,74 +147,42 @@
                 } catch(e) { console.error("Erro sync", e); }
                 return DB.cache || [];
             },
-
             add: async (text) => {
-                if (!isOnlineDB) {
-                    showToast("❌ Erro: Nuvem desconectada.");
-                    return;
-                }
+                if (!isOnlineDB) { showToast("❌ Erro: Nuvem desconectada."); return; }
                 const entry = { content: text, date: new Date().toISOString() };
-                
                 try { 
                     const res = await fetch(`${RENDER_API_URL}/memories`, { 
                         method: 'POST', 
                         headers: {'Content-Type': 'application/json'}, 
                         body: JSON.stringify(entry) 
                     });
-                    
                     if (res.ok) {
                         showToast("💾 Salvo na Nuvem");
-                        // Atualiza cache localmente para feedback instantâneo
                         DB.cache.unshift(entry);
                         DB.refreshList();
-                    } else {
-                        throw new Error("Erro API");
-                    }
-                } catch(e) {
-                    showToast("❌ Falha ao salvar.");
-                }
+                    } else { throw new Error("Erro API"); }
+                } catch(e) { showToast("❌ Falha ao salvar."); }
             },
-
-            // Busca "Inteligente" (Simulação de vetor por relevância de tokens)
             search: async (term) => {
                 if (!isOnlineDB) return [];
                 const memories = await DB.sync();
                 if (!memories.length) return [];
-
                 const queryTokens = term.toLowerCase().split(/\s+/).filter(t => t.length > 3);
                 if (queryTokens.length === 0) return [];
-
-                // Sistema de Pontuação (Scoring)
                 const scored = memories.map(mem => {
                     let score = 0;
                     const contentLower = mem.content.toLowerCase();
-                    
-                    // Match exato ganha mais pontos
                     if (contentLower.includes(term.toLowerCase())) score += 10;
-
-                    // Match de tokens individuais
-                    queryTokens.forEach(token => {
-                        if (contentLower.includes(token)) score += 2;
-                    });
-
+                    queryTokens.forEach(token => { if (contentLower.includes(token)) score += 2; });
                     return { content: mem.content, score };
                 });
-
-                // Filtra, ordena por pontuação e pega top 3
-                return scored
-                    .filter(item => item.score > 0)
-                    .sort((a, b) => b.score - a.score)
-                    .slice(0, 3)
-                    .map(item => item.content);
+                return scored.filter(item => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 3).map(item => item.content);
             },
-
             refreshList: async () => {
                 const list = $('memory-list');
                 const items = await DB.sync();
-                
                 $('mem-count').innerText = items.length;
                 list.innerHTML = items.length ? '' : '<div class="text-center text-gray-500 text-xs mt-10">Nuvem Vazia ou Offline</div>';
-                
                 const dark = userConfig.amoled;
                 items.forEach(item => {
                     const el = document.createElement('div');
@@ -227,11 +199,9 @@
             availableVoices = window.speechSynthesis.getVoices();
             const voiceSelect = $('select-voice');
             if(!voiceSelect) return;
-            
             voiceSelect.innerHTML = '';
             const ptVoices = availableVoices.filter(v => v.lang.includes('pt') || v.lang.includes('BR'));
             const voicesToUse = ptVoices.length > 0 ? ptVoices : availableVoices;
-            
             voicesToUse.forEach((voice, index) => {
                 const option = document.createElement('option');
                 option.value = index; 
@@ -260,15 +230,12 @@
             const modal = $('canvas-modal');
             const container = $('canvas-container');
             const consoleDiv = $('canvas-console');
-            
             container.innerHTML = ''; 
             consoleDiv.innerHTML = '<div class="text-gray-500 italic">Console pronto...</div>';
-            
             if (type === 'html') {
                 const iframe = document.createElement('iframe');
                 iframe.className = "w-full h-full bg-white rounded-lg border-0";
                 container.appendChild(iframe);
-                
                 const errorCaptureScript = `<script>
                     window.onerror = function(message, source, lineno, colno, error) {
                         window.parent.postMessage({type: 'error', message: message, line: lineno}, '*');
@@ -277,7 +244,6 @@
                         window.parent.postMessage({type: 'log', message: message}, '*');
                     };
                 <\/script>`;
-                
                 const doc = iframe.contentWindow.document;
                 doc.open();
                 doc.write(errorCaptureScript + code);
@@ -327,7 +293,6 @@
                     const pageWidth = doc.internal.pageSize.getWidth();
                     const pageHeight = doc.internal.pageSize.getHeight();
                     const margin = 20;
-                    
                     doc.setFontSize(22);
                     doc.setTextColor(40, 40, 40);
                     doc.text(title || "Documento NeuralOS", margin, 20);
@@ -335,17 +300,14 @@
                     doc.line(margin, 25, pageWidth - margin, 25);
                     doc.setFontSize(12);
                     doc.setTextColor(60, 60, 60);
-                    
                     const cleanContent = content.replace(/\*\*/g, "").replace(/#/g, "").replace(/`/g, "");
                     const lines = doc.splitTextToSize(cleanContent, pageWidth - (margin * 2));
                     let cursorY = 35;
-                    
                     lines.forEach(line => {
                         if (cursorY + 7 > pageHeight - margin) { doc.addPage(); cursorY = 20; }
                         doc.text(line, margin, cursorY);
                         cursorY += 7;
                     });
-                    
                     const fileName = `${(title || 'doc').substring(0, 15).replace(/[^a-z0-9]/gi, '_')}.pdf`;
                     doc.save(fileName);
                     return `PDF "${fileName}" salvo.`;
@@ -392,10 +354,9 @@
             let persona = "Seja conciso.";
             if (userConfig.vibe === 'Jarvis') persona = "Aja como JARVIS. Técnico.";
             if (userConfig.vibe === 'Amigo') persona = "Seja casual e amigo.";
-            
             chatHistory[0] = { 
                 role: "system", 
-                content: `NeuralOS v7.7. USER: ${userConfig.name}. MODE: ${persona}.
+                content: `NeuralOS v7.8. USER: ${userConfig.name}. MODE: ${persona}.
 TOOLS: [PDF: t|c], [PYTHON: code], [ALERTA: min|txt], [IMG: prompt], [CLIMA: city], [WIKI: term], [MEM: text].
 Use MEM apenas se usuário pedir para lembrar algo.` 
             };
@@ -412,16 +373,17 @@ Use MEM apenas se usuário pedir para lembrar algo.`
             try {
                 if (!navigator.gpu) throw new Error("Sem WebGPU.");
 
+                // Passamos o appConfig explicitamente para evitar erros de leitura interna
                 engine = await webllm.CreateMLCEngine(
                     MODEL_ID,
                     { 
+                        appConfig: appConfig, // IMPORTANTE: Passa a config manual
                         initProgressCallback: (report) => {
                             if(report.text.includes("Fetching")) $('status-text').innerText = "Baixando Modelo...";
                             else if(report.text.includes("Loading")) $('status-text').innerText = "Carregando na GPU...";
                             $('loading-bar').style.width = "70%";
                         },
-                        logLevel: "WARN",
-                        appConfig: { useIndexedDBCache: true }
+                        logLevel: "WARN"
                     }
                 );
 
@@ -439,60 +401,48 @@ Use MEM apenas se usuário pedir para lembrar algo.`
             } catch (err) {
                 $('status-text').innerText = "Erro: " + err.message;
                 $('status-text').className = "text-red-500 font-bold";
+                console.error(err);
             }
         }
 
         window.sendMessage = async () => {
             const input = $('input-box');
             let text = input.value.trim();
-            
             if (window.pendingFileContext) {
                 text = `${window.pendingFileContext}\n\n${text}`;
                 window.pendingFileContext = null;
                 $('attach-btn').classList.remove('text-green-500');
                 $('file-upload').value = '';
             }
-
             if (!text || !engine) return;
-
             const displayUserText = text.length > 500 ? text.slice(text.lastIndexOf('\n')+1) + " (Anexo)" : text;
             appendBubble('user', displayUserText);
             input.value = '';
-
-            // --- RAG: Busca na Nuvem ---
-            // Apenas busca se a mensagem tiver substância (>5 chars) e DB estiver online
             let context = "";
             if (text.length > 5 && isOnlineDB) {
                  const memories = await DB.search(text);
                  if (memories.length > 0) {
                      context = `[Contexto da Nuvem: ${memories.join(' | ')}]`;
-                     // Mostra feedback visual discreto que usou memória
                      showToast(`🧠 Usando ${memories.length} memórias`);
                  }
             }
             if (context) text = `${context}\n${text}`;
-
             const tempHistory = [...chatHistory, { role: "user", content: text }];
             const loadingId = showLoading();
-
             try {
                 const reply = await engine.chat.completions.create({
                     messages: tempHistory,
                     temperature: 0.3,
                     max_tokens: 1024,
                 });
-                
                 let raw = reply.choices[0].message.content;
                 let final = raw;
                 let toolResult = null;
-
                 const thoughtMatch = raw.match(/<pensamento>(.*?)<\/pensamento>/s);
                 if (thoughtMatch) {
                     appendBubble('thought', thoughtMatch[1]);
                     final = raw.replace(/<pensamento>.*?<\/pensamento>/s, "").trim();
                 }
-
-                // --- FERRAMENTAS ---
                 if (final.includes("[PDF:")) {
                     const match = final.match(/\[PDF:\s*(.*?)\s*\|\s*([\s\S]*?)\]/);
                     if (match) {
@@ -550,27 +500,22 @@ Use MEM apenas se usuário pedir para lembrar algo.`
                         final = final.replace(/\[MEM:.*?\]/, "💾 Memória salva na nuvem.");
                     }
                 }
-
                 removeLoading(loadingId);
                 appendBubble('assistant', final);
                 speak(final);
-
                 chatHistory.push({ role: "user", content: text });
                 chatHistory.push({ role: "assistant", content: final });
                 if (chatHistory.length > MAX_HISTORY) chatHistory.splice(1, 2);
-
             } catch (e) {
                 removeLoading(loadingId);
                 appendBubble('system', "Erro: " + e.message);
             }
         };
 
-        // --- UI AUX ---
         function appendBubble(role, text) {
             const box = $('chat-content');
             const div = document.createElement('div');
             const dark = userConfig.amoled;
-            
             if (role === 'thought') {
                 div.className = "flex w-full mb-2 animate-fade-in";
                 div.innerHTML = `<div class="${dark ? 'bg-gray-900 text-gray-500 border-gray-700' : 'bg-gray-100 text-gray-500 border-gray-400'} text-xs italic p-2 rounded-lg border-l-2 max-w-[85%]">💭 ${text}</div>`;
@@ -580,7 +525,6 @@ Use MEM apenas se usuário pedir para lembrar algo.`
             } else {
                 const isUser = role === 'user';
                 div.className = `flex w-full mb-4 animate-fade-in ${isUser ? 'justify-end' : 'justify-start'}`;
-                
                 let contentHTML = marked.parse(text);
                 if (!isUser && (text.includes("```html") || text.includes("```js"))) {
                     const codeMatch = text.match(/```(html|js)([\s\S]*?)```/);
@@ -610,7 +554,6 @@ Use MEM apenas se usuário pedir para lembrar algo.`
         }
         function updateLoading(id, txt) { const el = $(id+'-txt'); if(el) el.innerText = txt; }
         function removeLoading(id) { const el = $(id); if(el) el.remove(); }
-        
         function showToast(msg) { 
             const t = document.createElement('div');
             t.className = "fixed top-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-4 py-2 rounded-full shadow-lg z-50 animate-fade-in";
@@ -620,7 +563,6 @@ Use MEM apenas se usuário pedir para lembrar algo.`
         }
 
         window.toggleSettings = () => { $('settings-modal').classList.toggle('hidden'); loadVoices(); $('input-name').value = userConfig.name; $('select-vibe').value = userConfig.vibe; $('check-tts').checked = userConfig.ttsEnabled; $('check-amoled').checked = userConfig.amoled; };
-        
         window.saveSettings = () => { 
             userConfig.name = $('input-name').value;
             userConfig.vibe = $('select-vibe').value;
@@ -637,7 +579,6 @@ Use MEM apenas se usuário pedir para lembrar algo.`
             } catch(e) { showToast("Erro Storage"); }
             applyTheme(); updateSystemPrompt(); $('settings-modal').classList.add('hidden');
         };
-        
         window.switchTab = (tab) => {
             if (tab === 'chat') {
                 $('view-chat').classList.remove('hidden'); $('view-mem').classList.add('hidden');
