@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <title>NeuralOS v7.8 - Stable Fix</title>
+    <title>NeuralOS v7.9 - Fix Final</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
@@ -12,16 +12,17 @@
     <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
     
     <script type="module">
-        // Usamos uma versão fixa e estável, mas definiremos a config manualmente abaixo
-        import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.72/+esm";
+        // Voltamos para @latest para garantir correções de bugs, mas com config manual robusta
+        import * as webllm from "https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@latest/+esm";
 
         // --- CONFIGURAÇÃO ---
         const RENDER_API_URL = "https://neural-api-3vra.onrender.com"; 
+        // Usamos o ID exato que definiremos no appConfig
         const MODEL_ID = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
         const MAX_HISTORY = 6; 
 
-        // --- CONFIGURAÇÃO MANUAL DO MODELO (CORREÇÃO DO ERRO 'FIND') ---
-        // Isso impede que a biblioteca tente buscar em uma lista vazia ou indefinida
+        // --- CONFIGURAÇÃO MANUAL DO MODELO (ROBUSTA) ---
+        // Define explicitamente onde baixar o modelo para evitar erros de 'find' ou 'endsWith'
         const appConfig = {
             model_list: [
                 {
@@ -29,9 +30,10 @@
                     "model_lib_url": "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/web-llm-build/Llama-3.2-3B-Instruct-q4f16_1-MLC/Llama-3.2-3B-Instruct-q4f16_1-MLC-webgpu.wasm",
                     "vram_required_MB": 3000,
                     "low_resource_required": true,
+                    "required_features": ["shader-f16"], // Importante para Llama 3.2
                 }
             ],
-            useIndexedDBCache: true // Cache forçado aqui
+            useIndexedDBCache: true
         };
 
         // --- ESTADO GLOBAL ---
@@ -42,7 +44,7 @@
         let currentCanvasCode = ""; 
         let pyodideInstance = null;
         
-        // --- CONFIGURAÇÕES DO USUÁRIO (LOCAL STORAGE APENAS) ---
+        // --- CONFIGURAÇÕES DO USUÁRIO ---
         let userConfig = {
             name: 'Usuário',
             vibe: 'Assistente Padrão',
@@ -104,7 +106,7 @@
             }
         }
 
-        // --- BANCO DE DADOS (RENDER APENAS) ---
+        // --- BANCO DE DADOS (RENDER) ---
         const DB = {
             cache: [],
             lastFetch: 0,
@@ -194,7 +196,7 @@
             }
         };
 
-        // --- SISTEMA DE ÁUDIO ---
+        // --- ÁUDIO ---
         function loadVoices() {
             availableVoices = window.speechSynthesis.getVoices();
             const voiceSelect = $('select-voice');
@@ -224,7 +226,7 @@
             window.speechSynthesis.speak(utterance);
         }
 
-        // --- SISTEMA CANVAS ---
+        // --- CANVAS ---
         window.openCanvas = (code, type) => {
             currentCanvasCode = code; 
             const modal = $('canvas-modal');
@@ -283,7 +285,7 @@
             $('fix-code-btn').classList.add('hidden');
         };
 
-        // --- TOOLS ---
+        // --- FERRAMENTAS ---
         const Tools = {
             generatePDF: async (title, content) => {
                 try {
@@ -367,20 +369,20 @@ Use MEM apenas se usuário pedir para lembrar algo.`
             const wakeUpPromise = DB.wakeUp();
             updateSystemPrompt(); 
 
-            $('status-text').innerText = "Carregando IA...";
+            $('status-text').innerText = "Iniciando IA...";
             $('loading-bar').style.width = "10%";
 
             try {
                 if (!navigator.gpu) throw new Error("Sem WebGPU.");
 
-                // Passamos o appConfig explicitamente para evitar erros de leitura interna
+                // Inicialização robusta com fallback e config manual
                 engine = await webllm.CreateMLCEngine(
                     MODEL_ID,
                     { 
-                        appConfig: appConfig, // IMPORTANTE: Passa a config manual
+                        appConfig: appConfig, // Configuração manual injetada
                         initProgressCallback: (report) => {
                             if(report.text.includes("Fetching")) $('status-text').innerText = "Baixando Modelo...";
-                            else if(report.text.includes("Loading")) $('status-text').innerText = "Carregando na GPU...";
+                            else if(report.text.includes("Loading")) $('status-text').innerText = "Carregando GPU...";
                             $('loading-bar').style.width = "70%";
                         },
                         logLevel: "WARN"
@@ -399,9 +401,9 @@ Use MEM apenas se usuário pedir para lembrar algo.`
                 if (userConfig.name !== "Usuário") showToast(`Olá, ${userConfig.name}`);
 
             } catch (err) {
-                $('status-text').innerText = "Erro: " + err.message;
-                $('status-text').className = "text-red-500 font-bold";
-                console.error(err);
+                console.error("Erro Fatal:", err);
+                $('status-text').innerHTML = `Erro: ${err.message}<br><span class='text-[10px]'>Tente limpar o cache ou usar Chrome/Edge atualizado.</span>`;
+                $('status-text').className = "text-red-500 font-bold text-center";
             }
         }
 
